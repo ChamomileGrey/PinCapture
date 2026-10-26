@@ -4,6 +4,7 @@
 ;   v0.6.0 2026-10-22 Claude Opus 5.5 — 첫 버전: 사용자별 설치(관리자 권한 불필요), 시작 메뉴/바탕화면/
 ;                     자동 실행 바로가기, 설치·제거 전 실행 중인 앱 자동 종료(--quit → 실패 시 taskkill),
 ;                     관리자 권한 인스턴스 감지, 무인 업데이트 후 재실행, 제거 시 설정 삭제 선택
+;   v0.7.0 2026-10-26 Grok 4.7 — 게시자 이름을 ChamomileGrey 로 (build.py PUBLISHER 와 같음). AppId 는 그대로
 ;
 ; 빌드는 installer\build.py 가 함 (AppVersion 을 /DAppVersion=x.y.z 로 넘김).
 ; 직접 컴파일: ISCC.exe /DAppVersion=0.6.0 PinCapture.iss   (먼저 build.py --no-setup 으로 build\dist 생성)
@@ -14,7 +15,7 @@
 
 #define AppName        "핀캡처"
 #define AppNameEn      "PinCapture"
-#define AppPublisher   "PinCapture"
+#define AppPublisher   "ChamomileGrey"
 #define AppExe         "PinCapture.exe"
 ; pincapture.py 의 APP_USER_MODEL_ID / APP_MUTEX_NAME 과 같아야 함
 #define AppUserModelID "pincapture.app"

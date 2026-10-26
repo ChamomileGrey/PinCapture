@@ -4,9 +4,10 @@
 
 ![핀캡처 메인 창: 위쪽 캡처 버튼, 가운데 방금 캡처, 오른쪽 이전 캡처 목록](docs/images/screenshot-main.png)
 
-- 현재 버전: **0.6.1** (`pincapture.py`의 `APP_VERSION`)
+- 현재 버전: **0.7.0** (`pincapture.py`의 `APP_VERSION`)
+- 만든 이: **캐모마일그레이 (ChamomileGrey)**
 - 대상: Windows 10 / 11, 64비트(x64)
-- 인터넷 연결 없음, 계정·광고 없음
+- 계정·광고 없음. 앱은 네트워크에 연결하지 않고, 후원하기를 누를 때만 기본 브라우저를 엽니다.
 
 ## 주요 기능
 
@@ -23,6 +24,16 @@
 - **트레이 상주**: 창을 닫아도 트레이에 남아 단축키가 계속 동작합니다. 중복 실행하면 새로 뜨지 않고 기존 창이 앞으로 옵니다.
 - **고해상도(DPI 125%·150%) 화면**: 물리 픽셀 기준으로 캡처합니다.
 - **캡처 차단 감지 (0.6.1)**: 보안 프로그램이 화면 캡처를 막아 모든 모니터가 완전히 검게 찍히면, 검은 이미지를 저장하지 않고 원인과 해결 방법을 안내합니다. 차단을 우회하지는 않습니다.
+- **빠른 안내 (0.7.0)**: 처음 실행할 때 단축키와 핀 사용법을 한 번 보여 줍니다. 나중에 창의 **안내**나 트레이의 **빠른 안내**에서 다시 볼 수 있습니다. Windows 시작 시 트레이로만 켜질 때는 띄우지 않습니다.
+- **정보**: 버전, 만든 이, 라이선스 요약, 서드파티 고지를 정보 창에서 봅니다.
+- **후원하기**: 정보 창과 트레이 메뉴에서 [Ko-fi](https://ko-fi.com/chamomilegrey)를 엽니다. 후원하지 않아도 기능은 모두 무료이고, 작업을 끊는 후원 창은 없습니다.
+
+<table>
+  <tr>
+    <td><img src="docs/images/screenshot-welcome.png" width="320" alt="첫 실행 빠른 안내: 단축키와 핀 사용법"></td>
+    <td><img src="docs/images/screenshot-about.png" width="300" alt="정보 창: 버전, 캐모마일그레이, 라이선스, 후원하기"></td>
+  </tr>
+</table>
 
 <table>
   <tr>
@@ -49,7 +60,7 @@
 받은 파일이 올라온 파일과 같은지 확인하려면 Releases에 함께 올라온 `PinCapture-Setup-<버전>.sha256.txt`의 값과 비교합니다.
 
 ```powershell
-Get-FileHash .\PinCapture-Setup-0.6.1.exe -Algorithm SHA256
+Get-FileHash .\PinCapture-Setup-0.7.0.exe -Algorithm SHA256
 ```
 
 - **업데이트**: 새 설치 파일을 실행하면 됩니다. 실행 중인 핀캡처는 자동으로 닫히고 설정은 유지됩니다. 이때 화면의 핀과 파일로 저장하지 않은 캡처는 사라집니다.
@@ -60,14 +71,15 @@ Get-FileHash .\PinCapture-Setup-0.6.1.exe -Algorithm SHA256
 - 단축키를 누르거나 핀캡처 창 위쪽의 **영역 지정 / 창 캡처 / 전체 화면 / 핀 고정** 버튼을 누릅니다.
 - 캡처하면 핀캡처 창이 열리고 방금 캡처가 크게 보입니다(설정에서 끌 수 있음).
 - 창의 `×`는 트레이로 숨기기입니다. 완전히 끄려면 트레이 아이콘 우클릭 → **종료**.
-- 저장 폴더(기본: `사진\PinCapture`), 파일 형식(png/jpg), 파일 이름 앞부분, 단축키는 톱니 버튼(설정)에서 바꿉니다.
+- 저장 폴더(기본: `사진\PinCapture`), 파일 형식(png/jpg), 파일 이름 앞부분, 단축키는 **설정**에서 바꿉니다.
+- 버전과 라이선스는 **정보**에서, 단축키 설명은 **안내**에서 다시 볼 수 있습니다.
 - 사진 폴더가 OneDrive로 백업되는 PC에서는 캡처도 OneDrive에 동기화됩니다. 원하지 않으면 저장 폴더를 바꿉니다.
 
 자세한 사용법은 설치할 때 함께 들어가는 [사용법.txt](installer/docs/사용법.txt)에 있습니다(시작 메뉴의 **핀캡처 사용법**과 같은 내용).
 
 ## 개인정보
 
-핀캡처는 네트워크에 연결하지 않습니다. 업데이트 확인, 사용 통계, 오류 보고 전송 기능이 없습니다. 단축키를 감지하려고 키보드 입력을 확인하지만, 입력 내용을 저장하거나 보내지 않습니다.
+핀캡처는 네트워크에 연결하지 않습니다. 업데이트 확인, 사용 통계, 오류 보고 전송 기능이 없습니다. 단축키를 감지하려고 키보드 입력을 확인하지만, 입력 내용을 저장하거나 보내지 않습니다. **후원하기**는 기본 브라우저로 Ko-fi 페이지만 열 뿐, 앱이 그 페이지를 읽거나 정보를 보내지 않습니다.
 
 핀캡처가 직접 파일을 쓰는 곳은 아래가 전부입니다(`~`는 `C:\Users\<사용자>`).
 
@@ -159,4 +171,5 @@ Get-FileHash .\PinCapture-Setup-0.6.1.exe -Algorithm SHA256
 - [Qt for Python (PySide6)](https://doc.qt.io/qtforpython-6/) — 화면 표시와 캡처 (LGPL-3.0)
 - [pynput](https://github.com/moses-palmer/pynput) — 전역 단축키 (LGPL-3.0)
 - [PyInstaller](https://pyinstaller.org/), [Inno Setup](https://jrsoftware.org/isinfo.php) — 설치 파일 빌드
-- 코드는 Claude(claude.ai, Claude Code)와 함께 작성했습니다. 버전별 기록은 `pincapture.py` 맨 위 주석에 있습니다.
+- 코드는 Claude(claude.ai, Claude Code)와 Grok과 함께 작성했습니다. 버전별 기록은 `pincapture.py` 맨 위 주석에 있습니다.
+- 캐모마일그레이 (ChamomileGrey)

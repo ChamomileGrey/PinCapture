@@ -1,9 +1,10 @@
-# PinCapture installer build — v0.6.0 — one command from source to setup.exe
+# PinCapture installer build — v0.7.0 — one command from source to setup.exe
 # Created: 2026-10-22 by Claude Opus 5.5 via Claude Code
 # Install path: D:/Tools/PinCapture/installer/build.py
 # Changelog:
 #   v0.6.0 2026-10-22 Claude Opus 5.5 — first version: icon -> version resource -> PyInstaller onedir
 #                     -> bundle check -> smoke test -> Inno Setup -> SHA-256 + release note (배포안내.txt)
+#   v0.7.0 2026-10-26 Grok 4.7 — publisher/company is ChamomileGrey (kept in sync with PinCapture.iss)
 """
 Build PinCapture-Setup-<version>.exe.
 
@@ -35,7 +36,7 @@ SRC = ROOT / "pincapture.py"
 BUILD = HERE / "build"
 OUT = HERE / "output"
 ICON_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
-PUBLISHER = "PinCapture"                        # shown in EXE properties; keep in sync with PinCapture.iss
+PUBLISHER = "ChamomileGrey"                     # shown in EXE properties; keep in sync with PinCapture.iss
 
 
 def step(msg: str) -> None:
@@ -86,7 +87,7 @@ VSVersionInfo(
         StringStruct('FileDescription', '핀캡처 화면 캡처'),
         StringStruct('FileVersion', '{ver}'),
         StringStruct('InternalName', 'PinCapture'),
-        StringStruct('LegalCopyright', 'Copyright (C) 2026'),
+        StringStruct('LegalCopyright', 'Copyright (C) 2026 ChamomileGrey'),
         StringStruct('OriginalFilename', 'PinCapture.exe'),
         StringStruct('ProductName', '핀캡처 (PinCapture)'),
         StringStruct('ProductVersion', '{ver}')])

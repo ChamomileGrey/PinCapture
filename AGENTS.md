@@ -6,7 +6,7 @@
 ## 1. 프로젝트 한 줄 요약
 
 핀캡처(PinCapture)는 PySide6로 만든 Windows 10/11 x64용 화면 캡처 트레이 앱이에요. 영역·창·전체 화면 캡처, 화면 위 핀 고정, 보관함, 전역 단축키를 제공해요.
-소스는 `pincapture.py` 한 파일이고, 배포는 PyInstaller onedir + Inno Setup 설치 파일로 해요. 버전은 `pincapture.py`의 `APP_VERSION`(현재 `0.6.1`) 한 곳에서만 관리해요.
+소스는 `pincapture.py` 한 파일이고, 배포는 PyInstaller onedir + Inno Setup 설치 파일로 해요. 버전은 `pincapture.py`의 `APP_VERSION`(현재 `0.7.0`) 한 곳에서만 관리해요.
 
 ## 2. 저장소 지도
 
@@ -46,7 +46,7 @@
 | 시험(작업을 끝낼 때마다) | `py -3.13 -m pytest -q` | `19 passed`, 약 10초(2026-10-26 기준) |
 | 설치 파일 빌드 | `py -3.13 installer\build.py` | `installer\output\PinCapture-Setup-<버전>.exe`, `.sha256.txt`, `_배포안내.txt` |
 | 앱 폴더까지만 빌드 | `py -3.13 installer\build.py --no-setup` | `installer\build\dist\PinCapture\`(Inno Setup 없이도 됨) |
-| 버전 확인 | `py -3.13 pincapture.py --version` | `핀캡처 0.6.1` |
+| 버전 확인 | `py -3.13 pincapture.py --version` | `핀캡처 0.7.0` |
 | 소스로 실행(소유자 확인 후) | `py -3.13 pincapture.py`, 콘솔 없이 실행하려면 `pyw -3.13 pincapture.py` | 창과 트레이 아이콘 |
 
 명령줄 옵션은 아래와 같아요. 모르는 인수는 무시해요(`parse_known_args`).
@@ -114,7 +114,7 @@ py -3.13 -c "import sys,pathlib;p=pathlib.Path(sys.argv[1]);p.write_text(p.read_
 | 항목 | 현재 상태 | 영향받는 곳 |
 |---|---|---|
 | 앱 코드의 라이선스 | 없음(`LICENSE` 파일 없음). MIT를 추천해요 | 공개 저장소에 라이선스가 없으면 남이 쓸 권리가 없어요. `README.md`, 고지 문서 |
-| 게시자 이름 | 임시값 `"PinCapture"` | `installer/PinCapture.iss`의 `#define AppPublisher`와 `installer/build.py`의 `PUBLISHER`(둘을 함께 바꿔요). EXE 속성과 앱 목록에 표시돼요 |
+| 게시자 이름 | `ChamomileGrey` (0.7.0에서 정함. 한글 표기는 정보 창의 캐모마일그레이) | `installer/PinCapture.iss`의 `#define AppPublisher`와 `installer/build.py`의 `PUBLISHER`(둘을 함께 바꿔요). EXE 속성과 앱 목록에 표시돼요. 다시 바꿀 때는 소유자에게 확인해요 |
 | 코드 서명 | 없음 | SmartScreen 경고가 떠요(안내는 `_배포안내.txt`, `사용법.txt` 4장). Windows 11 스마트 앱 컨트롤이 켜진 PC에서는 설치가 막혀요 |
 | GitHub 소유자·저장소 이름 | 미정 | README 링크, CHANGELOG 비교 링크, 사용자 문의처 |
 | pynput을 Win32 `RegisterHotKey`로 바꿀지 | 미정(`docs/reviews/2026-10-22-release-review.md` 2번) | 단축키 코드, LGPL 고지, spec의 `module_collection_mode`, `build.py`의 `MUST_HAVE`, 관리자 권한 창 위에서의 단축키 동작 |
