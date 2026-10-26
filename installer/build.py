@@ -1,4 +1,4 @@
-# PinCapture installer build — v0.8.0 — one command from source to setup.exe
+# PinCapture installer build — v0.9.0 — one command from source to setup.exe
 # Created: 2026-10-22 by Claude Opus 5.5 via Claude Code
 # Install path: D:/Tools/PinCapture/installer/build.py
 # Changelog:
@@ -7,6 +7,7 @@
 #   v0.7.0 2026-10-26 Grok 4.7 — publisher/company is ChamomileGrey (kept in sync with PinCapture.iss)
 #                     stdout/stderr forced to UTF-8 so the Korean release-note name
 #                     prints on a cp1252 CI console
+#   v0.9.0 2026-10-26 Grok 4.7 — release note lists markup, eyedropper, and ruler shortcuts
 #   v0.8.0 2026-10-26 Grok 4.7 — bundle check also requires the Windows OCR extension to be packed
 #   v0.8.0 2026-10-26 Grok 4.7 — if installer/build is locked, say which PinCapture.exe to close;
 #                     smoke test runs in an isolated home (own config.json and save_dir)
@@ -177,6 +178,7 @@ SHA-256: {digest}
   · 시작 메뉴의 [핀캡처 사용법]에 단축키와 사용법이 있습니다.
   · 기본 단축키: 영역 Ctrl+Alt+A / 창 Ctrl+Alt+W / 전체 Ctrl+Alt+F / 핀 고정 Ctrl+Alt+Q
   · 최근 핀 다시 열기 Ctrl+Alt+R / 클릭 통과 해제 Ctrl+Alt+X
+  · 핀 표시 Ctrl+Alt+M / 스포이트 Ctrl+Alt+C / 자 Ctrl+Alt+D
   · 업데이트: 새 설치 파일을 실행하면 됩니다. 제거: 시작 메뉴에서 핀캡처 우클릭 → [제거]
   · 핀캡처는 인터넷에 연결하지 않습니다.
 """, encoding="utf-8-sig")

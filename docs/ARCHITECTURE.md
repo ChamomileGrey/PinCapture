@@ -2,7 +2,7 @@
 
 새 유지보수 담당자용 `pincapture.py` 지도. 앱 전체가 저장소 루트의 파일 하나(약 2,400줄)에 있다.
 
-- 작성 기준: `APP_VERSION = "0.8.0"` (2026-10-26). 내용이 코드와 다르면 **코드가 맞다**.
+- 작성 기준: `APP_VERSION = "0.9.0"` (2026-10-26). 내용이 코드와 다르면 **코드가 맞다**.
 - 줄 번호는 금방 바뀌므로 쓰지 않음. 함수·클래스 이름으로 찾을 것 (`Ctrl+F` / `grep -n "def 이름"`).
 - 아래 절 순서 = 파일 안의 순서.
 - 관련: 실행·빌드 안내 `docs/DEVELOPMENT.md` (일부 오래됨), 빌드 `installer/build.py`, 설치 스크립트 `installer/PinCapture.iss`, 시험 `tests/`.
@@ -100,7 +100,7 @@ flowchart LR
 | `pin_after_capture` | `False` | `_finish` (모든 캡처를 핀으로도) |
 | `pin_autosave` | `False` | `_finish` (핀 캡처 저장) |
 | `show_viewer_after_capture` | `True` | `_finish` |
-| `hotkeys` | `region`/`window`/`full`/`pin`/`reopen_pin`/`clickthrough` → `<ctrl>+<alt>+a`/`w`/`f`/`q`/`r`/`x` | `HotkeyManager.restart`, 트레이·핀 안내 |
+| `hotkeys` | `region`/`window`/`full`/`pin`/`reopen_pin`/`clickthrough`/`markup`/`eyedropper`/`ruler` → `<ctrl>+<alt>+a`/`w`/`f`/`q`/`r`/`x`/`m`/`c`/`d` | `HotkeyManager.restart`, 설정 창, 트레이·핀 안내 |
 | `recent_pin_limit` | `10` (1~50) | `RecentPinStore` |
 | `toolbar_pos` / `window_size` | `None` | `MainToolbar.__init__`, `_save_geometry` |
 | `welcome_seen` | `False` | 첫 실행 빠른 안내. `prepare_config()` 가 0.6.x 파일(키 없음)은 `True` 로 저장해 안내를 다시 띄우지 않음 |
@@ -164,8 +164,10 @@ Windows 가 아니면 `capture_active_window` 는 마우스가 있는 모니터 
 ## 6. 핀 창: `PinWindow`
 
 - `PinWindow(image, dpr)`: 프레임 없는 항상-위 `Tool` 창, `WA_DeleteOnClose`. 논리 크기 = 픽셀 / `dpr` x `_scale`.
-- 드래그 이동, 휠 확대/축소 (x1.1, 0.15~5.0), Ctrl+휠은 투명도 단계(100/80/60/40%), 더블클릭·`Esc` 닫기.
-- 우클릭 메뉴(`build_menu` / `contextMenuEvent`): 글자 복사(OCR) / 클립보드로 복사 / 다른 이름으로 저장(기본 폴더 = 홈) / 원본 크기 / 투명도 / 클릭 통과 / 닫기.
+- 드래그 이동, 휠 확대/축소 (x1.1, 0.15~5.0), Ctrl+휠은 투명도 단계(100/80/60/40%), 더블클릭·`Esc` 닫기. 표시 중(`begin_markup`)에는 왼쪽 드래그가 그림이고 핀은 움직이지 않으며, `Esc`는 `end_markup`만 한다.
+- 우클릭 메뉴(`build_menu` / `contextMenuEvent`): 글자 복사(OCR) / 클립보드에 복사 / 다른 이름으로 저장 / 원본 크기 / 표시 / 스포이트 / 자 / 투명도 / 클릭 통과 / 닫기.
+- 표시는 이미지 픽셀 좌표의 `Mark` 목록. `compose_marks`가 복사·저장용 이미지를 만들고, `copy_ocr`는 `image_for_ocr()`(원본)을 쓴다. `MarkupBar`는 표시를 시작할 때만 뜨는 별도 창이다.
+- 스포이트·자는 `ScreenInspectSession` / `InspectOverlay`. 영역 캡처와 같이 모니터별 정지 화면이고, `physical_point`로 물리 픽셀을 고른다. `screens_capture_blocked`면 오버레이를 띄우지 않는다.
 - `set_click_through`: `WindowTransparentForInput` 과 Windows `WS_EX_TRANSPARENT`. 켠 뒤에는 핀으로 끌 수 없고, `MainToolbar.clear_click_through`(트레이·단축키 `clickthrough`)만 끈다.
 - `recognize_image`: PyWinRT `Windows.Media.Ocr`. 가져오기 실패·언어 팩 없음은 안내 문장으로 반환(우회 없음).
 - `closed(self)` → `MainToolbar._on_pin_closed` 가 `_pins` 에서 빼고 `RecentPinStore.remember` (임시 폴더 PNG + 메모리). `reopen_recent_pin` 이 최신 항목을 다시 `_make_pin`.

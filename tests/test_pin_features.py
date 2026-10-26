@@ -254,6 +254,9 @@ def test_old_config_keeps_working_and_gains_defaults(pc, tmp_path, monkeypatch):
     assert cfg["hotkeys"]["window"] == pc.DEFAULTS["hotkeys"]["window"]
     assert cfg["hotkeys"]["reopen_pin"] == "<ctrl>+<alt>+r"
     assert cfg["hotkeys"]["clickthrough"] == "<ctrl>+<alt>+x"
+    assert cfg["hotkeys"]["markup"] == "<ctrl>+<alt>+m"
+    assert cfg["hotkeys"]["eyedropper"] == "<ctrl>+<alt>+c"
+    assert cfg["hotkeys"]["ruler"] == "<ctrl>+<alt>+d"
     assert cfg["recent_pin_limit"] == 10
 
 
