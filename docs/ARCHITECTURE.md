@@ -2,7 +2,7 @@
 
 새 유지보수 담당자용 `pincapture.py` 지도. 앱 전체가 저장소 루트의 파일 하나(약 2,400줄)에 있다.
 
-- 작성 기준: `APP_VERSION = "0.9.0"` (2026-10-26). 내용이 코드와 다르면 **코드가 맞다**.
+- 작성 기준: `APP_VERSION = "0.9.1"` (2026-10-26). 내용이 코드와 다르면 **코드가 맞다**.
 - 줄 번호는 금방 바뀌므로 쓰지 않음. 함수·클래스 이름으로 찾을 것 (`Ctrl+F` / `grep -n "def 이름"`).
 - 아래 절 순서 = 파일 안의 순서.
 - 관련: 실행·빌드 안내 `docs/DEVELOPMENT.md` (일부 오래됨), 빌드 `installer/build.py`, 설치 스크립트 `installer/PinCapture.iss`, 시험 `tests/`.
@@ -245,7 +245,7 @@ Qt 플랫폼이 `windows` 가 아니면(offscreen 등) 바로 `False` — `winId
 
 ## 12. 메인 창: `MainToolbar`
 
-`ToolButton` 은 캡처 버튼용 `QToolButton` (아이콘 위·글자 아래, 58x56).
+`ToolButton` 은 캡처 버튼용 `QToolButton` (아이콘 위·글자 아래, 80×48). `IconToolButton` 은 같은 줄 오른쪽의 아이콘만 있는 버튼(40×40)이다.
 
 ### 12.1 생성 (`__init__(cfg, server)`)
 
@@ -260,13 +260,13 @@ Qt 플랫폼이 `windows` 가 아니면(offscreen 등) 바로 `False` — `winId
 
 ### 12.2 UI (`_build_ui`)
 
-- 위: 제목과 `btn_help`(빠른 안내), `btn_about`(정보), `btn_settings`. 그 아래 캡처 버튼 줄 (`btn_region`, `btn_window`, `btn_full`, 구분선, `btn_pin`).
-- 가운데: 보관함 설명과 동작 줄 (`b_copy`, `b_save`, `b_pin_sel`, `b_folder`, 오른쪽 `b_remove`).
-- 아래: `QSplitter(preview, listw)`. `listw` 는 아이콘 모드 `QListWidget`, `ExtendedSelection`(Ctrl/Shift/드래그 다중 선택).
+- 위: 한 줄 헤더(앱 이름, `btn_help`, `btn_about`, `btn_settings`). 그 아래 캡처 줄. 왼쪽부터 `캡처` 제목, `btn_region`, `btn_window`, `btn_full`, 구분선, `btn_pin`, 여백, 구분선, `btn_markup`, `btn_eyedropper`, `btn_ruler`, `btn_ocr`, `btn_reopen`. 아이콘 버튼은 툴팁에 이름과 단축키를 적고, 글자 복사(`btn_ocr`)만 단축키가 없다.
+- 회색 구분선(`_divider`) 아래가 보관함. `보관함` 제목은 동작 버튼과 같은 줄이다 (`b_copy`, `b_save`, `b_pin_sel`, `b_folder`, 오른쪽 `b_remove`). 두 구역 제목은 `SECTION_TITLE_QSS` 를 같이 쓴다.
+- 아래: `QSplitter(preview, listw)`. `listw` 너비는 `THUMB_W + 48` 로 고정(한 열). 미리보기가 남는 폭을 가져간다. `ExtendedSelection`(Ctrl/Shift/드래그 다중 선택).
 - `QShortcut` 3개 (`WidgetWithChildrenShortcut`): `Copy` → `_copy_selected`, `Delete` → `_remove_selected`, `SelectAll` → `listw.selectAll` (리스트 기본 Ctrl+C 텍스트 복사를 덮어씀).
 - 맨 아래 `info` 라벨 (`_refresh_info`).
-- 스타일시트는 `_build_ui`, `ToolButton`, `_header_btn` 에 직접 있음.
-- `_update_tooltips()`: 캡처 버튼 툴팁에 현재 단축키 표시.
+- 스타일시트는 `_build_ui`, `ToolButton`, `IconToolButton`, `_header_btn` 에 직접 있음. 간격은 8px 격자(바깥 여백 16).
+- `_update_tooltips()`: 캡처·아이콘 버튼 툴팁에 현재 단축키 표시. `_sync_pin_tools()`: 선택된 캡처나 맨 앞 핀이 없으면 그리기·OCR 을 끈다. `_markup_current` / `_ocr_current` 는 선택된 보관함 이미지를 우선하고, 없으면 맨 앞 핀을 쓴다. 보관함 이미지를 그릴 때는 같은 `cacheKey` 의 핀을 재사용한다.
 
 ### 12.3 트레이와 창 동작
 
