@@ -23,6 +23,8 @@
 #                      트레이 메뉴를 정리. 정보 창과 트레이에 후원하기(Ko-fi). 설정 파일 형식은 그대로
 #   v0.8.0 2026-10-26  Grok (Grok 4.7) — 핀 우클릭 글자 복사(Windows OCR), 투명도·클릭 통과,
 #                      최근 핀 다시 열기, 거의 검은 캡처는 핀 대신 보안 프로그램 안내
+#   v0.9.0 2026-10-26  Grok (Grok 4.7) — 핀 위 표시(화살표·네모·형광펜·모자이크, 실행 취소),
+#                      화면 색 스포이트, 두 점 사이 픽셀 자. 메인 창 버튼은 그대로
 #   Created: 2026-08-04 by Claude via claude.ai / Modified: 2026-10-26 by Grok 4.7 via Cursor
 #   빌드: installer/build.py  (PyInstaller onedir + Inno Setup → PinCapture-Setup-<버전>.exe)
 """
@@ -34,6 +36,8 @@
   · 전체 화면 캡처 (마우스가 있는 모니터)
   · 핀 고정 (캡처한 이미지를 항상 위 창으로 화면에 고정)
   · 핀 우클릭: 글자 복사(Windows OCR), 투명도, 클릭 통과
+  · 핀 위 표시: 화살표, 네모, 형광펜, 모자이크 (복사·저장에 합성, OCR 은 원본)
+  · 스포이트(화면 색 HEX), 자(두 점의 물리 픽셀 거리)
   · 닫은 핀 다시 열기 (전역 단축키·트레이)
   · 전역 단축키, 트레이 상주, 자동 저장 + 클립보드 복사
 
@@ -49,6 +53,7 @@
 import sys
 import os
 import json
+import math
 import argparse
 import datetime
 import tempfile
@@ -58,7 +63,7 @@ IS_WINDOWS = sys.platform == "win32"
 _NO_WINDOW = 0x08000000 if IS_WINDOWS else 0   # subprocess.CREATE_NO_WINDOW
 
 APP_NAME = "핀캡처"
-APP_VERSION = "0.8.0"
+APP_VERSION = "0.9.0"
 APP_PUBLISHER = "캐모마일그레이"                 # 정보 창에 보이는 이름
 APP_PUBLISHER_EN = "ChamomileGrey"             # 설치 정보·EXE 속성과 같은 영문 이름
 KOFI_URL = "https://ko-fi.com/chamomilegrey"   # 후원하기. 이 주소만 연다
@@ -266,7 +271,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QBrush, QColor, QCursor, QDesktopServices, QFont, QFontDatabase, QGuiApplication, QIcon,
-    QImage, QImageReader, QKeySequence, QPainter, QPen, QPixmap, QShortcut,
+    QImage, QImageReader, QKeySequence, QPainter, QPen, QPixmap, QPolygonF, QShortcut,
 )
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (
@@ -340,6 +345,9 @@ DEFAULTS = {
         "pin":    "<ctrl>+<alt>+q",
         "reopen_pin": "<ctrl>+<alt>+r",    # 최근 핀 다시 열기
         "clickthrough": "<ctrl>+<alt>+x",  # 클릭 통과 해제 (핀은 클릭을 받지 못함)
+        "markup": "<ctrl>+<alt>+m",        # 맨 앞 핀에서 표시 시작
+        "eyedropper": "<ctrl>+<alt>+c",    # 화면 색 스포이트 (HEX 복사)
+        "ruler": "<ctrl>+<alt>+d",         # 두 점 사이 픽셀 거리
     },
     "recent_pin_limit": 10,            # 닫은 핀을 다시 열 수 있게 보관하는 개수
     "toolbar_pos": None,               # 창 위치 [x, y]
@@ -1028,6 +1036,259 @@ class RegionCaptureSession(QObject):
 
 
 # ---------------------------------------------------------------------------
+# 스포이트 / 자 (모니터별 정지 화면. 논리 좌표를 물리 픽셀로 환산)
+# ---------------------------------------------------------------------------
+def physical_point(widget_size: QSize, image_size: QSize, pt: QPoint) -> QPoint:
+    """위젯(논리) 좌표를 정지 화면의 물리 픽셀로. 화면 밖으로 나가면 가장자리로 붙인다."""
+    sx = image_size.width() / max(1, widget_size.width())
+    sy = image_size.height() / max(1, widget_size.height())
+    x = min(max(0, int(round(pt.x() * sx))), max(0, image_size.width() - 1))
+    y = min(max(0, int(round(pt.y() * sy))), max(0, image_size.height() - 1))
+    return QPoint(x, y)
+
+
+def scale_percent(widget_size: QSize, image_size: QSize) -> int:
+    """정지 화면 픽셀 / 위젯 논리 크기. 100 이면 100%, 200 이면 배율 2배."""
+    sx = image_size.width() / max(1, widget_size.width())
+    sy = image_size.height() / max(1, widget_size.height())
+    return int(round(((sx + sy) / 2.0) * 100))
+
+
+def format_color(color: QColor) -> "tuple[str, str]":
+    """(#RRGGBB, 'R r  G g  B b'). 클립보드에는 HEX 만 넣는다."""
+    hex_s = "#{:02X}{:02X}{:02X}".format(color.red(), color.green(), color.blue())
+    rgb = f"R {color.red()}  G {color.green()}  B {color.blue()}"
+    return hex_s, rgb
+
+
+def measure_pixels(a: QPoint, b: QPoint) -> dict:
+    """두 물리 픽셀 사이의 거리와 가로·세로. 단위는 픽셀."""
+    dx = int(b.x()) - int(a.x())
+    dy = int(b.y()) - int(a.y())
+    return {
+        "dx": abs(dx),
+        "dy": abs(dy),
+        "distance": int(round(math.hypot(dx, dy))),
+    }
+
+
+class InspectOverlay(QWidget):
+    """한 모니터의 정지 화면 위에서 색을 찍거나 두 점 거리를 잰다."""
+    picked = Signal(object)
+    canceled = Signal()
+
+    def __init__(self, screen, frozen: QPixmap, mode: str):
+        super().__init__(None)
+        self._screen = screen
+        self._frozen = frozen
+        self._image = frozen.toImage()
+        self._mode = mode if mode in ("eyedropper", "ruler") else "eyedropper"
+        self._mouse = QPoint(-1, -1)
+        self._anchor = None            # 자의 첫 점 (물리 픽셀)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint
+                            | Qt.WindowType.WindowStaysOnTopHint
+                            | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.setGeometry(screen.geometry())
+
+    def _phys(self, pt: QPoint) -> QPoint:
+        return physical_point(self.size(), self._image.size(), pt)
+
+    def _to_widget(self, phys: QPoint) -> QPoint:
+        sx = self.width() / max(1, self._image.width())
+        sy = self.height() / max(1, self._image.height())
+        return QPoint(int(round(phys.x() * sx)), int(round(phys.y() * sy)))
+
+    def enterEvent(self, e):
+        self.activateWindow()
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_Escape:
+            self.canceled.emit()
+        else:
+            super().keyPressEvent(e)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.RightButton:
+            self.canceled.emit()
+            return
+        if e.button() != Qt.MouseButton.LeftButton:
+            return
+        pos = e.position().toPoint()
+        phys = self._phys(pos)
+        if self._mode == "eyedropper":
+            color = QColor(self._image.pixel(phys)) if not self._image.isNull() else QColor(0, 0, 0)
+            hex_s, rgb = format_color(color)
+            self.picked.emit({
+                "mode": "eyedropper", "hex": hex_s, "rgb": rgb,
+                "r": color.red(), "g": color.green(), "b": color.blue(),
+            })
+            return
+        if self._anchor is None:
+            self._anchor = phys
+            self._mouse = pos
+            self.update()
+            return
+        result = measure_pixels(self._anchor, phys)
+        result["mode"] = "ruler"
+        result["scale"] = scale_percent(self.size(), self._image.size())
+        self.picked.emit(result)
+
+    def mouseMoveEvent(self, e):
+        self._mouse = e.position().toPoint()
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        if not self._frozen.isNull():
+            p.drawPixmap(self.rect(), self._frozen)
+        if self._mode == "eyedropper":
+            self._paint_eyedropper(p)
+        else:
+            self._paint_ruler(p)
+        p.end()
+
+    def _paint_eyedropper(self, p: QPainter):
+        pos = self._mouse if self._mouse.x() >= 0 else QPoint(self.width() // 2, self.height() // 2)
+        if self._image.isNull() or self._image.width() < 1:
+            return
+        phys = self._phys(pos)
+        color = QColor(self._image.pixel(phys))
+        hex_s, rgb = format_color(color)
+        loupe = self._paint_loupe(p, pos, phys)
+        label_y = (loupe.bottom() + 8) if loupe is not None else (pos.y() + 20)
+        self._draw_tag(p, QPoint(pos.x() + 16, label_y), f"{hex_s}   {rgb}")
+        self._draw_tag(p, QPoint(12, 12), "클릭하면 색을 복사해요  ·  Esc 또는 우클릭으로 취소")
+
+    def _paint_loupe(self, p: QPainter, pos: QPoint, phys: QPoint):
+        sample = 15
+        half = sample // 2
+        src = QRect(phys.x() - half, phys.y() - half, sample, sample).intersected(self._image.rect())
+        if not src.isValid() or src.width() < 1 or src.height() < 1:
+            return None
+        side = sample * 8
+        origin = QPoint(pos.x() + 18, pos.y() + 18)
+        if origin.x() + side > self.width() - 4:
+            origin.setX(pos.x() - side - 18)
+        if origin.y() + side > self.height() - 4:
+            origin.setY(pos.y() - side - 18)
+        origin.setX(max(4, origin.x()))
+        origin.setY(max(4, origin.y()))
+        dest = QRect(origin, QSize(side, side))
+        p.drawImage(dest, self._image, src)
+        p.setPen(QPen(QColor("white"), 2))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(dest.adjusted(0, 0, -1, -1))
+        rx = (phys.x() - src.x() + 0.5) / max(1, src.width())
+        ry = (phys.y() - src.y() + 0.5) / max(1, src.height())
+        hx = dest.left() + int(rx * dest.width())
+        hy = dest.top() + int(ry * dest.height())
+        p.drawLine(hx - 8, hy, hx + 8, hy)
+        p.drawLine(hx, hy - 8, hx, hy + 8)
+        return dest
+
+    def _paint_ruler(self, p: QPainter):
+        self._draw_tag(p, QPoint(12, 12), "두 점을 클릭하세요  ·  Esc 또는 우클릭으로 취소")
+        if self._anchor is None:
+            if self._mouse.x() >= 0:
+                pen = QPen(QColor(255, 255, 255, 180))
+                pen.setWidth(1)
+                p.setPen(pen)
+                p.drawLine(0, self._mouse.y(), self.width(), self._mouse.y())
+                p.drawLine(self._mouse.x(), 0, self._mouse.x(), self.height())
+            return
+        a = self._to_widget(self._anchor)
+        b = self._mouse if self._mouse.x() >= 0 else a
+        pen = QPen(QColor(ACCENT))
+        pen.setWidth(2)
+        p.setPen(pen)
+        p.drawLine(a, b)
+        p.setBrush(QColor(ACCENT))
+        p.drawEllipse(a, 4, 4)
+        if self._mouse.x() >= 0 and not self._image.isNull():
+            text = _ruler_label(self._anchor, self._phys(self._mouse),
+                                scale_percent(self.size(), self._image.size()))
+            self._draw_tag(p, QPoint(b.x() + 12, b.y() + 12), text)
+
+    def _draw_tag(self, p: QPainter, pos: QPoint, text: str):
+        f = QFont(self.font())
+        f.setPointSize(9)
+        p.setFont(f)
+        br = p.fontMetrics().boundingRect(text)
+        r = QRect(pos, QSize(br.width() + 14, br.height() + 8))
+        r.moveLeft(min(max(4, r.left()), max(4, self.width() - r.width() - 4)))
+        r.moveTop(min(max(4, r.top()), max(4, self.height() - r.height() - 4)))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(20, 26, 36, 215))
+        p.drawRoundedRect(r, 4, 4)
+        p.setPen(QColor("white"))
+        p.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
+
+
+def _ruler_label(a: QPoint, b: QPoint, scale: int) -> str:
+    m = measure_pixels(a, b)
+    return f"{m['distance']}px   가로 {m['dx']}   세로 {m['dy']}   {scale}%"
+
+
+class ScreenInspectSession(QObject):
+    """모든 모니터에 스포이트 또는 자 오버레이를 띄운다. 캡처가 막히면 검은 화면은 띄우지 않는다."""
+    finished = Signal(object)     # dict | None
+    blocked = Signal()
+
+    def __init__(self, mode: str):
+        super().__init__()
+        self._mode = mode if mode in ("eyedropper", "ruler") else "eyedropper"
+        self._overlays = []
+        self._done = False
+
+    def start(self):
+        screens = QGuiApplication.screens()
+        frozens = [grab_screen_raw(s) for s in screens]
+        if screens_capture_blocked(frozens):
+            self._done = True
+            QTimer.singleShot(0, self._emit_blocked)
+            return
+        for screen, frozen in zip(screens, frozens):
+            ov = InspectOverlay(screen, frozen, self._mode)
+            ov.picked.connect(self._on_picked)
+            ov.canceled.connect(self._on_canceled)
+            self._overlays.append(ov)
+            ov.show()
+        cur = screen_under_cursor()
+        for ov in self._overlays:
+            if ov._screen is cur:
+                ov.activateWindow()
+                ov.setFocus()
+
+    def _emit_blocked(self):
+        self.finished.emit(None)
+        self.blocked.emit()
+
+    def _cleanup(self):
+        for ov in self._overlays:
+            ov.blockSignals(True)
+            ov.close()
+        self._overlays.clear()
+
+    def _on_picked(self, result):
+        if self._done:
+            return
+        self._done = True
+        self._cleanup()
+        self.finished.emit(result)
+
+    def _on_canceled(self):
+        if self._done:
+            return
+        self._done = True
+        self._cleanup()
+        self.finished.emit(None)
+
+
+# ---------------------------------------------------------------------------
 # 핀 창 (항상 위 이미지 고정) + OCR + 최근 핀
 # ---------------------------------------------------------------------------
 OPACITY_STEPS = (100, 80, 60, 40)   # 핀 메뉴·Ctrl+휠 이 오가는 투명도 (%)
@@ -1437,6 +1698,245 @@ class RecentPinStore:
                 print(f"[recent] {meta.name} 읽기 실패: {e}")
 
 
+MARK_KINDS = ("arrow", "box", "highlight", "mosaic")
+MARK_TOOL_LABELS = (
+    ("arrow", "화살표"),
+    ("box", "네모"),
+    ("highlight", "형광펜"),
+    ("mosaic", "모자이크"),
+)
+MARK_COLORS = (
+    ("빨강", "#E23B3B"),
+    ("노랑", "#F5C518"),
+    ("파랑", "#2F6BFF"),
+    ("검정", "#222222"),
+)
+MARK_WIDTHS = (2, 4, 8)          # 논리 픽셀 프리셋. 이미지에는 dpr 을 곱해 저장
+HIGHLIGHT_ALPHA = 110
+PIN_TOOLTIP = "드래그로 옮기고, 휠로 크기를 조절해요. Ctrl+휠은 투명도, 우클릭은 메뉴, 더블클릭이나 Esc는 닫기예요."
+PIN_EDIT_TOOLTIP = "드래그로 표시를 그려요. Ctrl+Z 는 실행 취소, Ctrl+Y 는 다시 실행, Esc 는 표시를 끝내요."
+
+
+def mark_width_px(preset: int, dpr: float) -> int:
+    """두께 프리셋(논리 px)을 이미지 픽셀로. 150% 는 반올림한 배율을 곱한다."""
+    try:
+        preset_i = int(preset)
+    except (TypeError, ValueError):
+        preset_i = 4
+    if preset_i not in MARK_WIDTHS:
+        preset_i = min(MARK_WIDTHS, key=lambda w: abs(w - preset_i))
+    scale = max(1, int(round(float(dpr) if dpr else 1)))
+    return max(1, preset_i * scale)
+
+
+def mosaic_block_px(preset: int, dpr: float) -> int:
+    """모자이크 칸 크기(이미지 픽셀). 두꺼운 프리셋일수록 칸이 커진다."""
+    try:
+        preset_i = int(preset)
+    except (TypeError, ValueError):
+        preset_i = 4
+    scale = max(1, int(round(float(dpr) if dpr else 1)))
+    return max(4, (4 + preset_i) * scale)
+
+
+class Mark:
+    """핀 이미지 픽셀 좌표의 표시 하나. 핀을 확대해도 같은 자리에 남는다."""
+
+    def __init__(self, kind: str, x1: int, y1: int, x2: int, y2: int, color: str, width_px: int):
+        self.kind = kind if kind in MARK_KINDS else "arrow"
+        self.x1 = int(x1)
+        self.y1 = int(y1)
+        self.x2 = int(x2)
+        self.y2 = int(y2)
+        self.color = str(color)
+        self.width_px = max(1, int(width_px))
+
+    def rect(self) -> QRect:
+        return QRect(QPoint(self.x1, self.y1), QPoint(self.x2, self.y2)).normalized()
+
+
+def _mark_is_real(mark: Mark) -> bool:
+    return abs(mark.x2 - mark.x1) >= 2 or abs(mark.y2 - mark.y1) >= 2
+
+
+def compose_marks(image: QImage, marks) -> QImage:
+    """원본을 바꾸지 않고 표시를 합성한 이미지를 돌려준다. marks 가 비면 형식만 맞춘 복사본."""
+    out = image.convertToFormat(QImage.Format.Format_ARGB32).copy()
+    for mark in marks or ():
+        if mark.kind == "mosaic":
+            _apply_mosaic(out, mark)
+            continue
+        painter = QPainter(out)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        _paint_vector_mark(painter, mark)
+        painter.end()
+    return out
+
+
+def _apply_mosaic(image: QImage, mark: Mark) -> None:
+    rect = mark.rect().intersected(image.rect())
+    if rect.width() < 2 or rect.height() < 2:
+        return
+    block = max(4, int(mark.width_px))
+    chunk = image.copy(rect)
+    small_w = max(1, rect.width() // block)
+    small_h = max(1, rect.height() // block)
+    small = chunk.scaled(small_w, small_h, Qt.AspectRatioMode.IgnoreAspectRatio,
+                         Qt.TransformationMode.FastTransformation)
+    big = small.scaled(rect.size(), Qt.AspectRatioMode.IgnoreAspectRatio,
+                       Qt.TransformationMode.FastTransformation)
+    painter = QPainter(image)
+    painter.drawImage(rect.topLeft(), big)
+    painter.end()
+
+
+def _paint_vector_mark(p: QPainter, mark: Mark) -> None:
+    color = QColor(mark.color)
+    if mark.kind == "highlight":
+        rect = mark.rect()
+        if rect.width() < 1 or rect.height() < 1:
+            return
+        color.setAlpha(HIGHLIGHT_ALPHA)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        p.drawRect(rect)
+        return
+    if mark.kind == "box":
+        rect = mark.rect()
+        if rect.width() < 1 and rect.height() < 1:
+            return
+        pen = QPen(color)
+        pen.setWidth(max(1, mark.width_px))
+        pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRect(rect)
+        return
+    if mark.kind == "arrow":
+        _paint_arrow(p, mark)
+
+
+def _paint_arrow(p: QPainter, mark: Mark) -> None:
+    a = QPointF(mark.x1, mark.y1)
+    b = QPointF(mark.x2, mark.y2)
+    dx = b.x() - a.x()
+    dy = b.y() - a.y()
+    length = math.hypot(dx, dy)
+    if length < 1:
+        return
+    color = QColor(mark.color)
+    pen = QPen(color)
+    pen.setWidth(max(1, mark.width_px))
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawLine(a, b)
+    head = max(mark.width_px * 3.0, 8.0)
+    ux, uy = dx / length, dy / length
+    px, py = -uy, ux
+    base = QPointF(b.x() - ux * head, b.y() - uy * head)
+    left = QPointF(base.x() + px * head * 0.45, base.y() + py * head * 0.45)
+    right = QPointF(base.x() - px * head * 0.45, base.y() - py * head * 0.45)
+    p.setPen(Qt.PenStyle.NoPen)
+    p.setBrush(color)
+    p.drawPolygon(QPolygonF([b, left, right]))
+
+
+def _edit_key_action(e) -> str:
+    """편집 중 키. 'undo' | 'redo' | 'end' | ''."""
+    if e.key() == Qt.Key.Key_Escape:
+        return "end"
+    mods = e.modifiers()
+    ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+    shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+    if e.matches(QKeySequence.StandardKey.Undo) or (ctrl and not shift and e.key() == Qt.Key.Key_Z):
+        return "undo"
+    if (e.matches(QKeySequence.StandardKey.Redo) or (ctrl and e.key() == Qt.Key.Key_Y)
+            or (ctrl and shift and e.key() == Qt.Key.Key_Z)):
+        return "redo"
+    return ""
+
+
+class MarkupBar(QWidget):
+    """표시 중인 핀 옆에 뜨는 작은 도구. 메인 창에는 넣지 않는다."""
+
+    def __init__(self, pin: "PinWindow"):
+        super().__init__(None)
+        self._pin = pin
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint
+                            | Qt.WindowType.WindowStaysOnTopHint
+                            | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setWindowTitle("표시")
+        self.setStyleSheet(f"background:{BG}; border: 1px solid #D5DDEA; border-radius: 8px;")
+        row = QHBoxLayout(self)
+        row.setContentsMargins(8, 6, 8, 6)
+        row.setSpacing(4)
+        self._tools = {}
+        for kind, label in MARK_TOOL_LABELS:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _checked=False, k=kind: pin.set_markup_tool(k))
+            self._tools[kind] = btn
+            row.addWidget(btn)
+        self._colors = {}
+        for name, color in MARK_COLORS:
+            btn = QPushButton()
+            btn.setFixedSize(22, 22)
+            btn.setToolTip(name)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _checked=False, c=color: pin.set_markup_color(c))
+            self._colors[color] = btn
+            row.addWidget(btn)
+        self._widths = {}
+        for preset, label in ((2, "얇게"), (4, "보통"), (8, "굵게")):
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _checked=False, w=preset: pin.set_markup_width(w))
+            self._widths[preset] = btn
+            row.addWidget(btn)
+        undo = QPushButton("실행취소")
+        redo = QPushButton("다시실행")
+        done = QPushButton("완료")
+        undo.setCursor(Qt.CursorShape.PointingHandCursor)
+        redo.setCursor(Qt.CursorShape.PointingHandCursor)
+        done.setCursor(Qt.CursorShape.PointingHandCursor)
+        undo.clicked.connect(pin.undo_mark)
+        redo.clicked.connect(pin.redo_mark)
+        done.clicked.connect(pin.end_markup)
+        row.addWidget(undo)
+        row.addWidget(redo)
+        row.addWidget(done)
+        self.sync()
+
+    def sync(self):
+        pin = self._pin
+        for kind, btn in self._tools.items():
+            btn.setChecked(kind == pin._tool)
+        for color, btn in self._colors.items():
+            on = color.lower() == str(pin._color).lower()
+            btn.setChecked(on)
+            border = "#222222" if on else "#D0D5DD"
+            btn.setStyleSheet(
+                f"background:{color}; border-radius:4px; border:2px solid {border};")
+        for preset, btn in self._widths.items():
+            btn.setChecked(preset == pin._width_preset)
+
+    def keyPressEvent(self, e):
+        action = _edit_key_action(e)
+        if action == "end":
+            self._pin.end_markup()
+        elif action == "undo":
+            self._pin.undo_mark()
+        elif action == "redo":
+            self._pin.redo_mark()
+        else:
+            super().keyPressEvent(e)
+
+
 class PinWindow(QWidget):
     closed = Signal(object)
 
@@ -1451,13 +1951,26 @@ class PinWindow(QWidget):
         self._drag = None
         self._toast = None
         self.release_hotkey = ""          # 클릭 통과를 끄는 전역 단축키 (표시용)
+        self.on_eyedropper = None         # 화면 스포이트. MainToolbar 가 연결
+        self.on_ruler = None
+        self._editing = False
+        self._tool = "arrow"
+        self._color = MARK_COLORS[0][1]
+        self._width_preset = 4
+        self._marks = []
+        self._redo = []
+        self._draft = None
+        self._draft_origin = None
+        self._cache = None
+        self._bar = None
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.WindowStaysOnTopHint
                             | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setWindowTitle("핀 고정")
         self._apply_size()
-        self.setToolTip("드래그로 옮기고, 휠로 크기를 조절해요. Ctrl+휠은 투명도, 우클릭은 메뉴, 더블클릭이나 Esc는 닫기예요.")
+        self.setToolTip(PIN_TOOLTIP)
 
     @property
     def opacity_percent(self) -> int:
@@ -1501,6 +2014,8 @@ class PinWindow(QWidget):
         self.show()
         _set_win32_click_through(int(self.winId()), on)
         self.setWindowOpacity(self._opacity / 100.0)
+        if on and self._editing:
+            self.end_markup()
         if on:
             hint = format_hotkey(self.release_hotkey) or "단축키"
             self.show_toast(
@@ -1518,11 +2033,135 @@ class PinWindow(QWidget):
         return self._toast
 
     def copy_ocr(self) -> OcrResult:
-        result = recognize_image(self._img)
+        # 형광펜·모자이크가 글자를 가리면 인식이 나빠져서, OCR 은 표시 없는 원본을 본다.
+        result = recognize_image(self.image_for_ocr())
         if result.ok and result.text:
             QApplication.clipboard().setText(result.text)
         self.show_toast(result.message, 1800 if result.ok else 4200)
         return result
+
+    def image_for_ocr(self) -> QImage:
+        return self._img
+
+    def image_for_export(self) -> QImage:
+        """복사·저장에 쓰는 이미지. 확정된 표시가 합성돼 있다."""
+        return self._committed_image()
+
+    def _stroke_px(self) -> int:
+        if self._tool == "mosaic":
+            return mosaic_block_px(self._width_preset, self._dpr)
+        return mark_width_px(self._width_preset, self._dpr)
+
+    def _to_image_pt(self, pt: QPoint) -> QPoint:
+        return physical_point(self.size(), self._img.size(), pt)
+
+    def _committed_image(self) -> QImage:
+        if self._cache is None:
+            self._cache = compose_marks(self._img, self._marks)
+        return self._cache
+
+    def rendered_image(self) -> QImage:
+        base = self._committed_image()
+        if self._draft is None:
+            return base
+        return compose_marks(base, [self._draft])
+
+    def begin_markup(self, tool: str = "arrow") -> bool:
+        """표시 모드. 클릭 통과 중에는 핀이 마우스를 받지 못하므로 거절한다."""
+        if self._click_through:
+            self.show_toast("클릭 통과를 끄고 표시해 주세요.")
+            return False
+        if tool in MARK_KINDS:
+            self._tool = tool
+        self._editing = True
+        self._drag = None
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.setToolTip(PIN_EDIT_TOOLTIP)
+        self.setFocus()
+        self._ensure_bar()
+        self.update()
+        return True
+
+    def end_markup(self) -> None:
+        """표시만 끝낸다. 핀은 닫지 않는다."""
+        self._editing = False
+        self._draft = None
+        self._draft_origin = None
+        self._drag = None
+        bar = self._bar
+        self._bar = None
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.setToolTip(PIN_TOOLTIP)
+        if bar is not None:
+            bar.hide()
+            bar.close()
+        self.update()
+
+    def set_markup_tool(self, kind: str) -> None:
+        if kind in MARK_KINDS:
+            self._tool = kind
+        if not self._editing:
+            self.begin_markup(self._tool)
+        elif self._bar is not None:
+            self._bar.sync()
+
+    def set_markup_color(self, color: str) -> None:
+        self._color = color
+        if self._bar is not None:
+            self._bar.sync()
+
+    def set_markup_width(self, preset: int) -> None:
+        self._width_preset = int(preset)
+        if self._bar is not None:
+            self._bar.sync()
+
+    def _commit_mark(self, mark: Mark) -> None:
+        if not _mark_is_real(mark):
+            return
+        self._marks.append(mark)
+        self._redo.clear()
+        self._cache = None
+        self.update()
+
+    def undo_mark(self) -> bool:
+        if not self._marks:
+            return False
+        self._redo.append(self._marks.pop())
+        self._cache = None
+        self.update()
+        return True
+
+    def redo_mark(self) -> bool:
+        if not self._redo:
+            return False
+        self._marks.append(self._redo.pop())
+        self._cache = None
+        self.update()
+        return True
+
+    def _ensure_bar(self) -> None:
+        if self._bar is None:
+            self._bar = MarkupBar(self)
+        self._bar.sync()
+        self._bar.show()
+        self._place_markup_bar()
+
+    def _place_markup_bar(self) -> None:
+        bar = self._bar
+        if bar is None:
+            return
+        bar.adjustSize()
+        g = self.frameGeometry()
+        x = g.right() + 8
+        y = g.top()
+        screen = QGuiApplication.screenAt(g.center()) or QGuiApplication.primaryScreen()
+        if screen is not None:
+            bounds = screen.availableGeometry()
+            if x + bar.width() > bounds.right() - 4:
+                x = g.left() - bar.width() - 8
+            x = min(max(x, bounds.left() + 4), max(bounds.left() + 4, bounds.right() - bar.width() - 4))
+            y = min(max(y, bounds.top() + 4), max(bounds.top() + 4, bounds.bottom() - bar.height() - 4))
+        bar.move(x, y)
 
     def build_menu(self) -> "tuple[QMenu, dict]":
         m = QMenu(self)
@@ -1532,6 +2171,13 @@ class PinWindow(QWidget):
             "save": m.addAction("다른 이름으로 저장…"),
             "orig": m.addAction("원본 크기 (100%)"),
         }
+        mark_menu = m.addMenu("표시")
+        acts["tools"] = {}
+        for kind, label in MARK_TOOL_LABELS:
+            acts["tools"][kind] = mark_menu.addAction(label)
+        acts["mark_end"] = mark_menu.addAction("표시 끝내기")
+        acts["eyedropper"] = m.addAction("스포이트")
+        acts["ruler"] = m.addAction("자")
         opacity_menu = m.addMenu("투명도")
         acts["opacity"] = {}
         for pct in OPACITY_STEPS:
@@ -1552,17 +2198,26 @@ class PinWindow(QWidget):
         if chosen == acts["ocr"]:
             self.copy_ocr()
         elif chosen == acts["copy"]:
-            QApplication.clipboard().setImage(self._img)
+            QApplication.clipboard().setImage(self.image_for_export())
         elif chosen == acts["save"]:
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             path, _ = QFileDialog.getSaveFileName(
                 self, "저장", str(Path.home() / f"핀캡처_{ts}.png"),
                 "PNG (*.png);;JPEG (*.jpg)")
             if path:
-                self._img.save(path)
+                self.image_for_export().save(path)
+                self.show_toast("저장했어요.")
         elif chosen == acts["orig"]:
             self._scale = 1.0
             self._apply_size()
+        elif chosen == acts.get("mark_end"):
+            self.end_markup()
+        elif chosen == acts.get("eyedropper"):
+            if self.on_eyedropper is not None:
+                self.on_eyedropper()
+        elif chosen == acts.get("ruler"):
+            if self.on_ruler is not None:
+                self.on_ruler()
         elif chosen in acts["opacity"].values():
             for pct, act in acts["opacity"].items():
                 if chosen == act:
@@ -1572,13 +2227,19 @@ class PinWindow(QWidget):
             self.set_click_through(acts["click"].isChecked())
         elif chosen == acts["close"]:
             self.close()
+        else:
+            for kind, act in acts.get("tools", {}).items():
+                if chosen == act:
+                    self.begin_markup(kind)
+                    break
 
     # --- 이벤트 ---
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        p.drawPixmap(self.rect(), self._pm)
-        pen = QPen(QColor(ACCENT)); pen.setWidth(2)
+        p.drawImage(self.rect(), self.rendered_image())
+        pen = QPen(QColor(ACCENT))
+        pen.setWidth(2)
         p.setPen(pen)
         p.drawRect(self.rect().adjusted(0, 0, -1, -1))
         p.end()
@@ -1593,24 +2254,67 @@ class PinWindow(QWidget):
         self._apply_size()
 
     def mousePressEvent(self, e):
+        if self._editing and e.button() == Qt.MouseButton.LeftButton:
+            self._drag = None
+            self._draft_origin = self._to_image_pt(e.position().toPoint())
+            self._draft = None
+            self.setFocus()
+            return
         if e.button() == Qt.MouseButton.LeftButton:
             self._drag = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
 
     def mouseMoveEvent(self, e):
+        if self._editing:
+            if self._draft_origin is not None and (e.buttons() & Qt.MouseButton.LeftButton):
+                end = self._to_image_pt(e.position().toPoint())
+                self._draft = Mark(
+                    self._tool, self._draft_origin.x(), self._draft_origin.y(),
+                    end.x(), end.y(), self._color, self._stroke_px())
+                self.update()
+            return
         if self._drag is not None and (e.buttons() & Qt.MouseButton.LeftButton):
             self.move(e.globalPosition().toPoint() - self._drag)
 
     def mouseReleaseEvent(self, e):
+        if self._editing:
+            if e.button() == Qt.MouseButton.LeftButton and self._draft_origin is not None:
+                if self._draft is not None:
+                    self._commit_mark(self._draft)
+                self._draft = None
+                self._draft_origin = None
+                self.update()
+            return
         self._drag = None
 
     def mouseDoubleClickEvent(self, e):
+        if self._editing:
+            e.accept()
+            return
         self.close()
 
     def keyPressEvent(self, e):
+        if self._editing:
+            action = _edit_key_action(e)
+            if action == "end":
+                self.end_markup()
+            elif action == "undo":
+                self.undo_mark()
+            elif action == "redo":
+                self.redo_mark()
+            return
         if e.key() == Qt.Key.Key_Escape:
             self.close()
 
+    def moveEvent(self, e):
+        super().moveEvent(e)
+        self._place_markup_bar()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._place_markup_bar()
+
     def closeEvent(self, e):
+        self.end_markup()
         self.closed.emit(self)
         super().closeEvent(e)
 
@@ -1714,7 +2418,7 @@ class PreviewPane(QWidget):
 # 전역 단축키 (pynput — 실패해도 앱은 동작)
 # ---------------------------------------------------------------------------
 class HotkeyManager(QObject):
-    triggered = Signal(str)   # region | window | full | pin | reopen_pin | clickthrough
+    triggered = Signal(str)   # region | window | full | pin | reopen_pin | clickthrough | markup | eyedropper | ruler
 
     def __init__(self):
         super().__init__()
@@ -2011,6 +2715,9 @@ _WELCOME_MODES = (
     ("window", "창 캡처", "지금 쓰는 창을 찍어요. 일부가 가려져 있어도 창 내용이 나와요."),
     ("full", "전체 화면", "마우스가 있는 모니터 전체를 찍어요."),
     ("pin", "핀 고정", "고른 영역이 항상 위에 떠 있는 창이 돼요."),
+    ("markup", "핀 표시", "맨 앞 핀에 화살표·네모·형광펜·모자이크를 그려요. Esc로 표시만 끝내요."),
+    ("eyedropper", "스포이트", "화면 색을 찍어 HEX로 복사해요. RGB도 함께 보여 줘요."),
+    ("ruler", "자", "두 점 사이의 픽셀 거리와 가로·세로를 재요. 화면 배율을 반영해요."),
 )
 
 
@@ -2057,7 +2764,8 @@ class WelcomeDialog(QDialog):
         gv2 = QVBoxLayout(g2)
         gv2.addWidget(_muted(
             "· 드래그로 옮기고, 마우스 휠로 크기를 조절해요. Ctrl+휠은 투명도예요.\n"
-            "· 우클릭하면 글자 복사(OCR), 복사, 다른 이름으로 저장, 투명도, 클릭 통과 메뉴가 나와요.\n"
+            "· 우클릭하면 글자 복사(OCR), 복사, 다른 이름으로 저장, 표시, 스포이트, 자, 투명도, 클릭 통과 메뉴가 나와요.\n"
+            "· 표시 중에는 드래그로 그리고, Ctrl+Z로 실행 취소해요. Esc는 핀을 닫지 않고 표시만 끝내요.\n"
             "· 클릭 통과를 켜면 핀을 누를 수 없어요. 트레이의 클릭 통과 해제나 단축키로 꺼 주세요.\n"
             "· 더블클릭이나 Esc로 닫아요. 닫은 핀은 단축키로 다시 열 수 있어요.\n"
             "· 핀 고정으로 찍은 이미지는 기본적으로 파일로 저장하지 않고 클립보드에만 복사해요. "
@@ -2269,7 +2977,9 @@ class SettingsDialog(QDialog):
         self.ed_hk = {}
         labels = (("region", "영역 지정"), ("window", "창 캡처"),
                   ("full", "전체 화면"), ("pin", "핀 고정"),
-                  ("reopen_pin", "최근 핀 다시 열기"), ("clickthrough", "클릭 통과 해제"))
+                  ("reopen_pin", "최근 핀 다시 열기"), ("clickthrough", "클릭 통과 해제"),
+                  ("markup", "핀 표시"), ("eyedropper", "스포이트"),
+                  ("ruler", "자"))
         for i, (mode, label) in enumerate(labels):
             ed = QLineEdit(cfg["hotkeys"].get(mode, ""))
             ed.setPlaceholderText("비우면 사용 안 함")
@@ -2277,15 +2987,17 @@ class SettingsDialog(QDialog):
             self.ed_hk[mode] = ed
             grid.addWidget(QLabel(label), i // 2, (i % 2) * 2)
             grid.addWidget(ed, i // 2, (i % 2) * 2 + 1)
+        tip_row = (len(labels) + 1) // 2
         tip = _muted("형식은 <ctrl>+<alt>+a, <print_screen> 이에요. 비우면 그 단축키를 쓰지 않아요. "
                      "다른 프로그램과 겹치면 여기 조합을 바꿔 주세요.")
-        grid.addWidget(tip, 3, 0, 1, 4)
+        grid.addWidget(tip, tip_row, 0, 1, 4)
         btn_reset = QPushButton("단축키를 기본값으로")
         btn_reset.setToolTip(
             "영역 Ctrl+Alt+A, 창 Ctrl+Alt+W, 전체 Ctrl+Alt+F, 핀 Ctrl+Alt+Q, "
-            "최근 핀 Ctrl+Alt+R, 클릭 통과 해제 Ctrl+Alt+X 로 되돌려요.")
+            "최근 핀 Ctrl+Alt+R, 클릭 통과 해제 Ctrl+Alt+X, "
+            "표시 Ctrl+Alt+M, 스포이트 Ctrl+Alt+C, 자 Ctrl+Alt+D 로 되돌려요.")
         btn_reset.clicked.connect(self._reset_hotkeys)
-        grid.addWidget(btn_reset, 4, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
+        grid.addWidget(btn_reset, tip_row + 1, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
         v.addWidget(g3)
 
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
@@ -2811,7 +3523,65 @@ class MainToolbar(QWidget):
         if mode == "clickthrough":
             self.clear_click_through()
             return
+        if mode == "markup":
+            self.start_pin_markup()
+            return
+        if mode in ("eyedropper", "ruler"):
+            self.start_inspect(mode)
+            return
         self.capture(mode)
+
+    def _front_pin(self):
+        for pin in reversed(self._pins):
+            try:
+                if pin.isVisible():
+                    return pin
+            except RuntimeError:
+                continue
+        return None
+
+    def start_pin_markup(self):
+        """맨 앞에 보이는 핀에서 표시를 시작한다. 핀이 없으면 안내만 한다."""
+        pin = self._front_pin()
+        if pin is None:
+            self._show_notice("표시할 핀이 없어요.")
+            return None
+        if not pin.begin_markup(pin._tool):
+            return None
+        return pin
+
+    def start_inspect(self, mode: str):
+        """스포이트 또는 자. 영역 캡처와 같이 화면을 먼저 멈추고, 막혀 있으면 검은 화면을 띄우지 않는다."""
+        if self._capturing:
+            return
+        self._capturing = True
+        self._was_visible = self.isVisible()
+        delay = 30
+        if self.cfg.get("hide_during_capture") and self._was_visible:
+            self.hide()
+            delay = 220
+        QTimer.singleShot(delay, lambda m=mode: self._run_inspect(m))
+
+    def _run_inspect(self, mode: str):
+        self._session = ScreenInspectSession(mode)
+        self._session.finished.connect(self._finish_inspect)
+        self._session.blocked.connect(self._capture_blocked)
+        self._session.start()
+
+    def _finish_inspect(self, result):
+        self._session = None
+        self._capturing = False
+        if self._was_visible:
+            self.show()
+        if not result:
+            return
+        if result.get("mode") == "eyedropper":
+            QApplication.clipboard().setText(result.get("hex", ""))
+            self._show_notice(f"{result.get('hex', '')}   {result.get('rgb', '')} 를 복사했어요.")
+        elif result.get("mode") == "ruler":
+            self._show_notice(
+                f"{result['distance']}px예요. 가로 {result['dx']}px, 세로 {result['dy']}px, "
+                f"화면 배율 {result['scale']}%예요.")
 
     def _show_notice(self, text: str, title: str = APP_NAME, msec: int = 2200) -> None:
         self._last_notice = text
@@ -3012,6 +3782,8 @@ class MainToolbar(QWidget):
             dpr = scr.devicePixelRatio() if scr is not None else 1.0
         pin = PinWindow(img, dpr=dpr)
         pin.release_hotkey = self.cfg.get("hotkeys", {}).get("clickthrough", "")
+        pin.on_eyedropper = lambda: self.start_inspect("eyedropper")
+        pin.on_ruler = lambda: self.start_inspect("ruler")
         if scale != 1.0:
             pin._scale = float(scale)
             pin._apply_size()
