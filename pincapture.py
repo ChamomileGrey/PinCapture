@@ -25,6 +25,8 @@
 #                      최근 핀 다시 열기, 거의 검은 캡처는 핀 대신 보안 프로그램 안내
 #   v0.9.0 2026-10-26  Grok (Grok 4.7) — 핀 위 표시(화살표·네모·형광펜·모자이크, 실행 취소),
 #                      화면 색 스포이트, 두 점 사이 픽셀 자. 메인 창 버튼은 그대로
+#   v0.9.1 2026-10-26  Grok (Grok 4.7) — 메인 창 상단을 압축하고, 표시·스포이트·자·글자 복사·
+#                      최근 핀을 캡처 줄 오른쪽의 작은 아이콘으로 배치
 #   Created: 2026-08-04 by Claude via claude.ai / Modified: 2026-10-26 by Grok 4.7 via Cursor
 #   빌드: installer/build.py  (PyInstaller onedir + Inno Setup → PinCapture-Setup-<버전>.exe)
 """
@@ -63,7 +65,7 @@ IS_WINDOWS = sys.platform == "win32"
 _NO_WINDOW = 0x08000000 if IS_WINDOWS else 0   # subprocess.CREATE_NO_WINDOW
 
 APP_NAME = "핀캡처"
-APP_VERSION = "0.9.0"
+APP_VERSION = "0.9.1"
 APP_PUBLISHER = "캐모마일그레이"                 # 정보 창에 보이는 이름
 APP_PUBLISHER_EN = "ChamomileGrey"             # 설치 정보·EXE 속성과 같은 영문 이름
 KOFI_URL = "https://ko-fi.com/chamomilegrey"   # 후원하기. 이 주소만 연다
@@ -647,15 +649,60 @@ def _draw_trash(p: QPainter, s: int, c: QColor):
     p.drawLine(s - 10, 11, s - 10, s - 7)
 
 
+def _draw_markup(p: QPainter, s: int, c: QColor):
+    """연필. 핀 위 표시."""
+    p.drawLine(QPointF(7, s - 6), QPointF(s - 6, 7))
+    p.drawLine(QPointF(5, s - 5), QPointF(8, s - 8))
+    p.drawLine(QPointF(5, s - 5), QPointF(8, s - 3))
+    p.drawLine(QPointF(s - 8, 5), QPointF(s - 4, 5))
+    p.drawLine(QPointF(s - 4, 5), QPointF(s - 4, 9))
+
+
+def _draw_eyedropper(p: QPainter, s: int, c: QColor):
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawLine(QPointF(6, s - 6), QPointF(s - 9, 8))
+    p.drawEllipse(QPointF(s - 7, 7), 3.4, 3.4)
+    p.drawLine(QPointF(5, s - 4), QPointF(8, s - 8))
+    p.drawLine(QPointF(5, s - 4), QPointF(9, s - 4))
+
+
+def _draw_ruler(p: QPainter, s: int, c: QColor):
+    p.drawLine(QPointF(5, 6), QPointF(5, s - 5))
+    p.drawLine(QPointF(5, s - 5), QPointF(s - 4, s - 5))
+    for x in (10, 14, 18):
+        p.drawLine(QPointF(x, s - 5), QPointF(x, s - 9))
+    p.drawLine(QPointF(5, 10), QPointF(8, 10))
+    p.drawLine(QPointF(5, 15), QPointF(9, 15))
+
+
+def _draw_ocr(p: QPainter, s: int, c: QColor):
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawRoundedRect(4, 3, s - 8, s - 7, 2, 2)
+    p.drawLine(7, 8, s - 8, 8)
+    p.drawLine(7, 12, s - 10, 12)
+    p.drawLine(7, 16, s - 12, 16)
+
+
+def _draw_reopen(p: QPainter, s: int, c: QColor):
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawArc(5, 5, s - 10, s - 10, 45 * 16, 280 * 16)
+    p.drawLine(QPointF(s - 7, 6), QPointF(s - 3, 6))
+    p.drawLine(QPointF(s - 7, 6), QPointF(s - 7, 10))
+
+
 def make_icon(kind: str, color: str = TEXT, size: int = 24) -> QIcon:
     fn = {
         "region": _draw_region, "window": _draw_window, "full": _draw_full,
         "pin": _draw_pin, "gear": _draw_gear, "close": _draw_close,
         "list": _draw_list, "help": _draw_help, "info": _draw_info,
         "copy": _draw_copy, "folder": _draw_folder, "save": _draw_save,
-        "trash": _draw_trash,
+        "trash": _draw_trash, "markup": _draw_markup, "eyedropper": _draw_eyedropper,
+        "ruler": _draw_ruler, "ocr": _draw_ocr, "reopen": _draw_reopen,
     }[kind]
-    return QIcon(_make_pixmap(size, fn, color))
+    icon = QIcon()
+    icon.addPixmap(_make_pixmap(size, fn, color), QIcon.Mode.Normal, QIcon.State.Off)
+    icon.addPixmap(_make_pixmap(size, fn, "#9AA3B2"), QIcon.Mode.Disabled, QIcon.State.Off)
+    return icon
 
 
 def make_app_icon(size: int = 64) -> QIcon:
@@ -3071,24 +3118,48 @@ class SettingsDialog(QDialog):
 # ---------------------------------------------------------------------------
 # 메인 툴바
 # ---------------------------------------------------------------------------
+_TOOL_QSS = f"""
+    QToolButton {{
+        border: none; border-radius: 8px; color: {TEXT};
+        font-size: 12px; background: transparent; padding: 0px;
+    }}
+    QToolButton:hover {{ background: #EDF3FE; }}
+    QToolButton:pressed {{ background: #DDE9FD; }}
+    QToolButton:disabled {{ color: #9AA3B2; background: transparent; }}
+"""
+
+SECTION_TITLE_QSS = "font-size: 13px; font-weight: 700; margin: 0px; padding: 0px;"
+
+
 class ToolButton(QToolButton):
+    """캡처 줄의 글자 있는 버튼. 너비·높이는 8px 격자."""
+
     def __init__(self, icon: QIcon, text: str, tip: str = ""):
         super().__init__()
         self.setIcon(icon)
         self.setText(text)
         self.setToolTip(tip or text)
-        self.setIconSize(QSize(26, 26))
+        self.setIconSize(QSize(20, 20))
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-        self.setFixedSize(88, 72)
+        self.setFixedSize(80, 48)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet(f"""
-            QToolButton {{
-                border: none; border-radius: 8px; color: {TEXT};
-                font-size: 12px; background: transparent; padding: 4px 2px 2px 2px;
-            }}
-            QToolButton:hover {{ background: #EDF3FE; }}
-            QToolButton:pressed {{ background: #DDE9FD; }}
-        """)
+        self.setStyleSheet(_TOOL_QSS)
+
+
+class IconToolButton(QToolButton):
+    """캡처 줄 오른쪽의 아이콘만 있는 버튼. 툴팁에 이름과 단축키를 적는다."""
+
+    def __init__(self, icon: QIcon, name: str):
+        super().__init__()
+        self.setIcon(icon)
+        self.setText(name)
+        self.setAccessibleName(name)
+        self.setToolTip(name)
+        self.setIconSize(QSize(20, 20))
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.setFixedSize(40, 40)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet(_TOOL_QSS)
 
 
 class MainToolbar(QWidget):
@@ -3165,11 +3236,14 @@ class MainToolbar(QWidget):
         self.setStyleSheet(f"""
             #mainRoot {{ background: white; color: {TEXT}; }}
             QPushButton {{
-                padding: 6px 12px; border: 1px solid {BORDER}; color: {TEXT};
+                padding: 4px 12px; border: 1px solid {BORDER}; color: {TEXT};
                 border-radius: 6px; background: {BG}; font-size: 12px;
             }}
             QPushButton:hover {{ background: #EDF3FE; }}
             QPushButton:pressed {{ background: #DDE9FD; }}
+            QPushButton#actionBtn {{
+                padding: 0px 8px;
+            }}
             QToolButton#headerBtn {{
                 border: 1px solid {BORDER}; border-radius: 6px; background: {BG};
                 color: {TEXT}; padding: 4px 10px; font-size: 12px;
@@ -3183,70 +3257,81 @@ class MainToolbar(QWidget):
             QListWidget::item:selected {{ background: #D6E4FC; color: {TEXT}; }}
         """)
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 12, 16, 12)
+        root.setContentsMargins(16, 8, 16, 8)
         root.setSpacing(8)
 
         head = QHBoxLayout()
-        head.setSpacing(10)
+        head.setSpacing(8)
         mark = QLabel()
-        mark.setPixmap(make_app_icon(28).pixmap(28, 28))
-        head.addWidget(mark, alignment=Qt.AlignmentFlag.AlignTop)
-        titles = QVBoxLayout()
-        titles.setSpacing(0)
+        mark.setPixmap(make_app_icon(24).pixmap(24, 24))
+        mark.setFixedSize(24, 24)
+        head.addWidget(mark, alignment=Qt.AlignmentFlag.AlignVCenter)
         title = QLabel(APP_NAME)
-        title.setStyleSheet("font-size: 16px; font-weight: 700;")
-        subtitle = QLabel("화면을 찍어 보관하고, 필요한 부분은 핀으로 고정해요.")
-        subtitle.setStyleSheet(f"color:{TEXT_SUB}; font-size: 12px;")
-        titles.addWidget(title)
-        titles.addWidget(subtitle)
-        head.addLayout(titles)
+        title.setStyleSheet("font-size: 16px; font-weight: 700; margin: 0; padding: 0;")
+        title.setFixedHeight(32)
+        title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        head.addWidget(title, alignment=Qt.AlignmentFlag.AlignVCenter)
         head.addStretch(1)
         self.btn_help = self._header_btn("help", "안내", "단축키와 핀 사용법을 다시 봐요.", self.show_welcome)
         self.btn_about = self._header_btn("info", "정보", "버전, 만든 이, 라이선스, 후원을 봐요.", self.show_about)
         self.btn_settings = self._header_btn("gear", "설정", "저장 폴더, 동작, 단축키를 바꿔요.", self.open_settings)
         for b in (self.btn_help, self.btn_about, self.btn_settings):
-            head.addWidget(b, alignment=Qt.AlignmentFlag.AlignTop)
+            head.addWidget(b, alignment=Qt.AlignmentFlag.AlignVCenter)
         root.addLayout(head)
 
-        cap_title = QLabel("캡처")
-        cap_title.setStyleSheet("font-weight: 700;")
-        root.addWidget(cap_title)
-
         cap = QHBoxLayout()
-        cap.setSpacing(6)
-        self.btn_region = ToolButton(make_icon("region"), "영역 지정")
-        self.btn_window = ToolButton(make_icon("window"), "창 캡처")
-        self.btn_full = ToolButton(make_icon("full"), "전체 화면")
-        self.btn_pin = ToolButton(make_icon("pin"), "핀 고정")
+        cap.setSpacing(8)
+        self.cap_title = QLabel("캡처")
+        self.cap_title.setObjectName("sectionTitle")
+        self.cap_title.setStyleSheet(SECTION_TITLE_QSS)
+        self.cap_title.setFixedHeight(24)
+        self.cap_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        cap.addWidget(self.cap_title, alignment=Qt.AlignmentFlag.AlignVCenter)
+        cap.addSpacing(8)
+        self.btn_region = ToolButton(make_icon("region", size=20), "영역 지정")
+        self.btn_window = ToolButton(make_icon("window", size=20), "창 캡처")
+        self.btn_full = ToolButton(make_icon("full", size=20), "전체 화면")
+        self.btn_pin = ToolButton(make_icon("pin", size=20), "핀 고정")
         self.btn_region.clicked.connect(lambda: self.capture("region"))
         self.btn_window.clicked.connect(lambda: self.capture("window"))
         self.btn_full.clicked.connect(lambda: self.capture("full"))
         self.btn_pin.clicked.connect(lambda: self.capture("pin"))
         for b in (self.btn_region, self.btn_window, self.btn_full):
-            cap.addWidget(b)
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setStyleSheet(f"color:{BORDER};")
-        cap.addWidget(sep)
-        cap.addWidget(self.btn_pin)
+            cap.addWidget(b, alignment=Qt.AlignmentFlag.AlignVCenter)
+        cap.addWidget(self._vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
+        cap.addWidget(self.btn_pin, alignment=Qt.AlignmentFlag.AlignVCenter)
         cap.addStretch(1)
+        cap.addWidget(self._vsep(), alignment=Qt.AlignmentFlag.AlignVCenter)
+        self.btn_markup = IconToolButton(make_icon("markup", size=20), "핀에 그리기")
+        self.btn_eyedropper = IconToolButton(make_icon("eyedropper", size=20), "스포이트")
+        self.btn_ruler = IconToolButton(make_icon("ruler", size=20), "자")
+        self.btn_ocr = IconToolButton(make_icon("ocr", size=20), "글자 복사")
+        self.btn_reopen = IconToolButton(make_icon("reopen", size=20), "최근 핀")
+        self.btn_markup.clicked.connect(self._markup_current)
+        self.btn_eyedropper.clicked.connect(lambda: self.start_inspect("eyedropper"))
+        self.btn_ruler.clicked.connect(lambda: self.start_inspect("ruler"))
+        self.btn_ocr.clicked.connect(self._ocr_current)
+        self.btn_reopen.clicked.connect(self.reopen_recent_pin)
+        for b in (self.btn_markup, self.btn_eyedropper, self.btn_ruler, self.btn_ocr, self.btn_reopen):
+            cap.addWidget(b, alignment=Qt.AlignmentFlag.AlignVCenter)
         root.addLayout(cap)
 
-        divider = QFrame()
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet(f"color:{BORDER}; background:{BORDER}; max-height:1px;")
-        root.addWidget(divider)
-
-        hist_title = QLabel("보관함")
-        hist_title.setStyleSheet("font-weight: 700;")
-        root.addWidget(hist_title)
-        hist_hint = QLabel("왼쪽이 지금 보는 캡처, 오른쪽이 이전 캡처예요. 목록에서 빼도 파일은 지워지지 않아요.")
-        hist_hint.setWordWrap(True)
-        hist_hint.setStyleSheet(f"color:{TEXT_SUB}; font-size: 11px;")
-        root.addWidget(hist_hint)
+        self._divider = QFrame()
+        self._divider.setObjectName("sectionDivider")
+        self._divider.setFrameShape(QFrame.Shape.HLine)
+        self._divider.setFixedHeight(1)
+        self._divider.setStyleSheet(f"color:{BORDER}; background:{BORDER}; border: none; max-height: 1px;")
+        root.addWidget(self._divider)
 
         bar = QHBoxLayout()
-        bar.setSpacing(6)
+        bar.setSpacing(8)
+        self.hist_title = QLabel("보관함")
+        self.hist_title.setObjectName("sectionTitle")
+        self.hist_title.setStyleSheet(SECTION_TITLE_QSS)
+        self.hist_title.setFixedHeight(24)
+        self.hist_title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        bar.addWidget(self.hist_title, alignment=Qt.AlignmentFlag.AlignVCenter)
+        bar.addSpacing(8)
         self.b_copy = self._action_btn("copy", "클립보드에 복사",
                                        "선택한 캡처를 클립보드에 복사해요. 여러 개면 파일 묶음으로 복사해요.")
         self.b_save = self._action_btn("save", "다른 이름으로 저장",
@@ -3263,24 +3348,30 @@ class MainToolbar(QWidget):
         self.b_folder.clicked.connect(self._open_folder)
         self.b_remove.clicked.connect(self._remove_selected)
         for b in (self.b_copy, self.b_save, self.b_pin_sel, self.b_folder):
-            bar.addWidget(b)
+            bar.addWidget(b, alignment=Qt.AlignmentFlag.AlignVCenter)
         bar.addStretch(1)
-        bar.addWidget(self.b_remove)
+        bar.addWidget(self.b_remove, alignment=Qt.AlignmentFlag.AlignVCenter)
         root.addLayout(bar)
 
         split = QSplitter(Qt.Orientation.Horizontal)
+        split.setChildrenCollapsible(False)
+        split.setHandleWidth(8)
         self.preview = PreviewPane()
+        self.preview.setMinimumSize(320, 160)
         self.listw = QListWidget()
         self.listw.setViewMode(QListView.ViewMode.IconMode)
         self.listw.setResizeMode(QListView.ResizeMode.Adjust)
         self.listw.setMovement(QListView.Movement.Static)
-        self.listw.setIconSize(QSize(HistoryEntry.THUMB_W, 118))
-        self.listw.setGridSize(QSize(HistoryEntry.THUMB_W + 28, 170))
+        self.listw.setIconSize(QSize(HistoryEntry.THUMB_W, 112))
+        self.listw.setGridSize(QSize(HistoryEntry.THUMB_W + 32, 176))
         self.listw.setWordWrap(True)
-        self.listw.setMinimumWidth(HistoryEntry.THUMB_W + 46)
+        list_w = HistoryEntry.THUMB_W + 48   # 한 줄. 창을 늘려도 미리보기가 넓어진다
+        self.listw.setMinimumWidth(list_w)
+        self.listw.setMaximumWidth(list_w)
         self.listw.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.listw.setToolTip("클릭하면 크게 봐요. Ctrl이나 Shift를 누른 채 클릭하거나 드래그하면 여러 개를 골라요. "
-                              "Ctrl+A는 전체, Ctrl+C는 복사, Delete는 목록에서 제거예요.")
+                              "Ctrl+A는 전체, Ctrl+C는 복사, Delete는 목록에서 제거예요. "
+                              "목록에서 빼도 파일은 지워지지 않아요.")
         self.listw.currentRowChanged.connect(self._on_row_changed)
         self.listw.itemSelectionChanged.connect(self._refresh_info)
         for seq, slot in ((QKeySequence.StandardKey.Copy, self._copy_selected),
@@ -3293,11 +3384,13 @@ class MainToolbar(QWidget):
         split.addWidget(self.listw)
         split.setStretchFactor(0, 1)
         split.setStretchFactor(1, 0)
-        split.setSizes([780, HistoryEntry.THUMB_W + 52])
+        split.setSizes([760, list_w])
         root.addWidget(split, 1)
 
         self.info = QLabel("")
-        self.info.setStyleSheet(f"color:{TEXT_SUB}; font-size: 12px;")
+        self.info.setFixedHeight(24)
+        self.info.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.info.setStyleSheet(f"color:{TEXT_SUB}; font-size: 12px; margin: 0; padding: 0;")
         root.addWidget(self.info)
 
     def _header_btn(self, kind: str, text: str, tip: str, slot) -> QToolButton:
@@ -3308,31 +3401,118 @@ class MainToolbar(QWidget):
         b.setText(text)
         b.setToolTip(tip)
         b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        b.setFixedHeight(32)
+        b.setIconSize(QSize(16, 16))
         b.setCursor(Qt.CursorShape.PointingHandCursor)
         b.clicked.connect(slot)
         return b
 
+    def _vsep(self) -> QFrame:
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setFixedSize(1, 32)
+        sep.setStyleSheet(f"color:{BORDER}; background:{BORDER}; border: none;")
+        return sep
+
     def _action_btn(self, kind: str, text: str, tip: str) -> QPushButton:
         b = QPushButton(make_icon(kind, TEXT, 16), text)
+        b.setObjectName("actionBtn")
         b.setIconSize(QSize(16, 16))
+        b.setFixedHeight(32)
         b.setToolTip(tip)
         b.setCursor(Qt.CursorShape.PointingHandCursor)
         return b
 
+    def _hotkey_line(self, mode: "str | None") -> str:
+        if not mode:
+            return "단축키: 없음"
+        combo = (self.cfg.get("hotkeys") or {}).get(mode, "")
+        if combo:
+            return f"단축키: {hotkey_label(combo)}"
+        return "단축키: 없음 (설정에서 지정할 수 있어요)"
+
     def _update_tooltips(self):
-        hk = self.cfg["hotkeys"]
-        tips = (
-            ("region", self.btn_region, "드래그로 영역을 골라 캡처해요. Esc나 우클릭으로 취소해요."),
-            ("window", self.btn_window, "지금 쓰는 창을 캡처해요. 일부가 가려져 있어도 창 내용이 나와요."),
-            ("full", self.btn_full, "마우스가 있는 모니터 전체를 캡처해요."),
-            ("pin", self.btn_pin, "영역을 고르면 그 부분이 항상 위에 떠 있는 핀이 돼요."),
+        hk_tips = (
+            ("region", self.btn_region, "영역 지정", "드래그로 영역을 골라 캡처해요. Esc나 우클릭으로 취소해요."),
+            ("window", self.btn_window, "창 캡처", "지금 쓰는 창을 캡처해요. 일부가 가려져 있어도 창 내용이 나와요."),
+            ("full", self.btn_full, "전체 화면", "마우스가 있는 모니터 전체를 캡처해요."),
+            ("pin", self.btn_pin, "핀 고정", "영역을 고르면 그 부분이 항상 위에 떠 있는 핀이 돼요."),
+            ("markup", self.btn_markup, "핀에 그리기", "보관함에서 고른 캡처나 맨 앞 핀에 화살표·네모·형광펜·모자이크를 그려요."),
+            ("eyedropper", self.btn_eyedropper, "스포이트", "화면 색을 찍어 HEX로 복사해요. RGB도 보여 줘요."),
+            ("ruler", self.btn_ruler, "자", "두 점 사이의 픽셀 거리와 가로·세로를 재요."),
+            (None, self.btn_ocr, "글자 복사", "보관함에서 고른 캡처나 맨 앞 핀의 글자를 클립보드에 복사해요."),
+            ("reopen_pin", self.btn_reopen, "최근 핀", "가장 최근에 닫은 핀을 다시 열어요."),
         )
-        for mode, btn, text in tips:
-            combo = hk.get(mode, "")
-            if combo:
-                btn.setToolTip(f"{text}\n단축키: {hotkey_label(combo)}")
-            else:
-                btn.setToolTip(f"{text}\n단축키: 없음 (설정에서 지정할 수 있어요)")
+        empty = {
+            self.btn_markup: "그릴 캡처나 핀이 없어요. 보관함에서 고르거나 핀을 띄워 주세요.",
+            self.btn_ocr: "글자를 읽을 캡처나 핀이 없어요. 보관함에서 고르거나 핀을 띄워 주세요.",
+        }
+        for mode, btn, name, text in hk_tips:
+            if not btn.isEnabled() and btn in empty:
+                btn.setToolTip(f"{name}\n{empty[btn]}")
+                continue
+            btn.setToolTip(f"{name}\n{text}\n{self._hotkey_line(mode)}")
+
+    def _has_tool_target(self) -> bool:
+        img = getattr(self, "_cur_img", None)
+        if img is not None and not img.isNull():
+            return True
+        return self._front_pin() is not None
+
+    def _sync_pin_tools(self) -> None:
+        """그리기·OCR 은 선택된 캡처나 맨 앞 핀이 있을 때만 누를 수 있다."""
+        has = self._has_tool_target()
+        self.btn_markup.setEnabled(has)
+        self.btn_ocr.setEnabled(has)
+        self._update_tooltips()
+
+    def _pin_matching(self, img: QImage):
+        key = img.cacheKey()
+        for pin in reversed(self._pins):
+            try:
+                if pin.isVisible() and pin._img.cacheKey() == key:
+                    return pin
+            except RuntimeError:
+                continue
+        return None
+
+    def _pin_for_tool(self):
+        """선택된 보관함 캡처를 우선하고, 없으면 맨 앞 핀. 캡처는 핀으로 띄운 뒤 쓴다."""
+        img = getattr(self, "_cur_img", None)
+        if img is not None and not img.isNull():
+            found = self._pin_matching(img)
+            if found is not None:
+                return found
+            return self._make_pin(img, None)
+        return self._front_pin()
+
+    def _markup_current(self):
+        pin = self._pin_for_tool()
+        if pin is None:
+            self._show_notice("그릴 캡처나 핀이 없어요.")
+            return None
+        if not pin.begin_markup(pin._tool):
+            return None
+        pin.raise_()
+        pin.activateWindow()
+        return pin
+
+    def _ocr_current(self):
+        img = getattr(self, "_cur_img", None)
+        if img is not None and not img.isNull():
+            pin = self._pin_matching(img)
+            if pin is not None:
+                return pin.copy_ocr()
+            result = recognize_image(img)
+            if result.ok and result.text:
+                QApplication.clipboard().setText(result.text)
+            self._show_notice(result.message, msec=1800 if result.ok else 4200)
+            return result
+        pin = self._front_pin()
+        if pin is None:
+            self._show_notice("글자를 읽을 캡처나 핀이 없어요.")
+            return None
+        return pin.copy_ocr()
 
     def _tray_menu(self) -> QMenu:
         """트레이 우클릭 메뉴. 캡처, 안내, 후원을 나눠 두었어요."""
@@ -3797,6 +3977,7 @@ class MainToolbar(QWidget):
             g = scr.availableGeometry()
             pin.move(g.center() - QPoint(pin.width() // 2, pin.height() // 2))
         pin.show()
+        self._sync_pin_tools()
         return pin
 
     def _on_pin_closed(self, pin):
@@ -3806,6 +3987,7 @@ class MainToolbar(QWidget):
             self._recent.remember(pin)
         except Exception as e:
             print(f"[recent] 보관 실패: {e}")
+        self._sync_pin_tools()
 
     def _notify(self, path):
         if not self.cfg["notify"] or self._tray is None:
@@ -3902,10 +4084,12 @@ class MainToolbar(QWidget):
         self.b_remove.setText(f"목록에서 제거 ({n})" if n > 1 else "목록에서 제거")
         if e is None or not rows:
             self.info.setText("아직 캡처가 없어요. 위쪽 버튼이나 단축키로 화면을 찍어 보세요.")
+            self._sync_pin_tools()
             return
         if n > 1:
             self.info.setText(f"{n}개 선택   ·   복사하면 파일 묶음으로 복사하고, 저장하면 폴더에 한꺼번에 저장해요."
                               "   ·   핀은 모두 고정하고, Delete는 목록에서만 제거해요. 파일은 지우지 않아요.")
+            self._sync_pin_tools()
             return
         img = getattr(self, "_cur_img", None)
         where = e.path if e.path else "저장하지 않은 캡처 (메모리에만 있어요)"
@@ -3913,6 +4097,7 @@ class MainToolbar(QWidget):
             self.info.setText(f"(이미지를 읽을 수 없음)   ·   {where}")
         else:
             self.info.setText(f"{img.width()}×{img.height()} px   ·   {where}")
+        self._sync_pin_tools()
 
     def _copy_selected(self):
         entries = self._selected_entries()
