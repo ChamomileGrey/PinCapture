@@ -113,6 +113,7 @@ GitHub → Actions → `build` 실행이 끝나면 아래를 확인해요.
 | `Tag must match APP_VERSION` | 태그와 `APP_VERSION`이 다름 | 잘못 붙인 태그는 `git push --delete origin vX.Y.Z`와 `git tag -d vX.Y.Z`로 지우고(아직 게시 전일 때만) 다시 붙여요 |
 | `Ensure Inno Setup 6` | `choco install innosetup` 실패, 또는 다른 경로에 설치됨, 또는 `Korean.isl` 없음 | 로그의 `ISCC:` 경로를 확인해요. `build.py`의 `find_iscc()`는 `%ProgramFiles(x86)%\Inno Setup 6` 등 정해진 경로와 `PATH`만 봐요. 종료 코드 3010은 워크플로가 성공으로 바꿔요 |
 | `Build installer` | 번들 검사, 연기 시험, `compiler:Languages\Korean.isl` 없음, BOM이 빠진 `.iss` | 3장 표를 보세요. 한국어 메시지 파일이 없다는 오류면 러너의 Inno Setup 버전을 확인해요 |
+| `Build installer` | `UnicodeEncodeError` (`cp1252`) while printing `_배포안내.txt` | 설치는 끝났고 마지막 출력만 실패한 경우예요. `installer/build.py`의 `configure_stdio()`와 워크플로의 `PYTHONIOENCODING=utf-8`이 그 출력을 UTF-8로 바꿔요 |
 | `upload-artifact` | `installer/output/`가 비어 있음 | 앞 단계 로그를 확인해요 |
 | `Draft release` | 권한 부족(403) | 저장소 Settings → Actions → General → Workflow permissions에서 쓰기 권한을 확인해요(워크플로에는 `contents: write`가 있어요) |
 | 릴리스 첨부 파일 이름 | 한글이 들어간 `_배포안내.txt` 이름이 GitHub에서 바뀔 수 있음 | 본문에 내용을 붙였으면 그 첨부 파일은 지워도 돼요 |

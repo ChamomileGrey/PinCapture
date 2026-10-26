@@ -20,6 +20,10 @@ jobs:
   build:
     runs-on: windows-latest
     timeout-minutes: 45
+    env:
+      # cp1252 is the default console on windows-latest. build.py also reconfigures
+      # its own stdout; this covers pytest failure text and any child Python process.
+      PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
 

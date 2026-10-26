@@ -23,6 +23,7 @@
 
 ### 수정
 - 시험이 모두 통과한 뒤 PySide6 정적 소멸자에서 프로세스가 죽던 문제를 막았어요. `tests/conftest.py`가 요약을 출력한 다음 pytest 종료 코드로 끝나요. Windows CI는 그 충돌을 종료 코드 1로 보고 시험 실패로 오해했어요.
+- 설치 빌드가 Windows CI의 cp1252 콘솔에서 `_배포안내.txt` 경로를 출력하다 `UnicodeEncodeError`로 죽던 문제를 막았어요. `installer/build.py`가 표준 출력을 UTF-8로 맞추고, CI 잡에 `PYTHONIOENCODING=utf-8`을 넣었어요.
 
 ## [0.6.1] - 2026-10-26
 
