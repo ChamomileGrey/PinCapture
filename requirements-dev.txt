@@ -1,0 +1,6 @@
+# Build + test dependencies (installer/build.py and tests/). Also needs Inno Setup 6 (ISCC.exe) for the setup.
+-r requirements.txt
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.9
+pillow==12.3.0
+pytest>=8

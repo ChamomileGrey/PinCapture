@@ -1,0 +1,65 @@
+﻿핀캡처 (PinCapture) — 오픈소스 소프트웨어 고지
+================================================
+
+핀캡처는 아래 오픈소스 소프트웨어를 사용합니다. 각 라이선스 전문은 설치 폴더의 licenses 폴더에 있습니다.
+This program uses the following open-source software. Full license texts are in the "licenses" folder.
+
+
+1. Qt 6.11.2 / Qt for Python (PySide6, Shiboken6) 6.11.2
+   License : GNU Lesser General Public License v3 (LGPL-3.0)  — licenses\LGPL-3.0.txt, licenses\GPL-3.0.txt
+   Copyright (C) The Qt Company Ltd. and other contributors.
+   Source  : https://download.qt.io/official_releases/QtForPython/
+             https://code.qt.io/cgit/qt/qtbase.git/tag/?h=v6.11.2
+
+   These libraries are used unmodified, as the official PyPI release (PySide6 6.11.2), and are
+   installed as separate dynamic libraries in the "_internal\PySide6" and "_internal\shiboken6"
+   folders. You may replace them with your own compatible build of the same version.
+   Only the modules this program uses are installed (Qt Core, Gui, Widgets, Network, OpenGL and the
+   Windows platform, style and ICO/JPEG image plugins).
+
+   The Qt libraries contain third-party code (FreeType, HarfBuzz, libpng, libjpeg-turbo, PCRE2,
+   zlib, md4c, Pixman, TinyCBOR, double-conversion, the Unicode Character Database and CLDR,
+   the Public Suffix List and others). Their names, versions, copyright notices and license texts
+   are listed in licenses\Qt-third-party.txt.
+   This software is based in part on the work of the Independent JPEG Group.
+   Portions of this software are copyright (C) The FreeType Project (www.freetype.org).
+   All rights reserved.
+
+2. pynput 1.8.2
+   License : GNU Lesser General Public License v3 (LGPL-3.0)  — licenses\LGPL-3.0.txt, licenses\GPL-3.0.txt
+   Copyright (C) 2015-2024 Moses Palmér
+   Source  : https://github.com/moses-palmer/pynput  (https://pypi.org/project/pynput/1.8.2/)
+
+   Used unmodified. Installed as plain Python source files in the "_internal\pynput" folder,
+   which you may replace with a modified version.
+
+3. six 1.17.0
+   License : MIT  — licenses\six-MIT.txt
+   Copyright (c) 2010-2024 Benjamin Peterson
+
+4. Python 3.13 runtime
+   License : Python Software Foundation License Version 2  — licenses\Python-PSF.txt
+   Copyright (c) 2001 Python Software Foundation. All rights reserved.
+
+   The Python runtime includes:
+   · OpenSSL 3.0.15 (libcrypto-3.dll) — Apache License 2.0 — licenses\Apache-2.0.txt
+     Copyright (c) 1998-2024 The OpenSSL Project Authors
+     Copyright (c) 1995-1998 Eric A. Young, Tim J. Hudson
+   · libffi (libffi-8.dll) — MIT — licenses\MIT.txt
+     Copyright (c) 1996-2022 Anthony Green, Red Hat, Inc and others
+   · mimalloc (inside python313.dll) — MIT — licenses\MIT.txt
+     Copyright (c) 2018-2021 Microsoft Corporation, Daan Leijen
+   · bzip2, zlib and liblzma — see licenses\Python-PSF.txt and the respective projects
+
+5. Microsoft Visual C++ runtime
+   vcruntime140.dll, msvcp140*.dll, ucrtbase.dll and api-ms-win-*.dll are Microsoft redistributable
+   files, distributed under the Microsoft Visual Studio redistribution terms.
+
+6. PyInstaller bootloader
+   License : GNU GPL v2 with a special exception that permits distribution of
+             programs built with PyInstaller under any license.
+   Source  : https://github.com/pyinstaller/pyinstaller
+
+
+Nothing in the license terms of 핀캡처 restricts modification of the above libraries for your
+own use or reverse engineering for debugging such modifications.

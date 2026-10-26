@@ -1,0 +1,119 @@
+# 배포 절차 (릴리스 체크리스트)
+
+새 버전을 GitHub Release로 배포할 때 위에서부터 순서대로 따라 해요. 배포 여부와 시점은 소유자가 정해요.
+명령은 저장소 루트에서 PowerShell로 실행해요. 아래 예시의 `X.Y.Z`는 새 버전으로 바꿔 읽으세요.
+
+> **`installer/PinCapture.iss`의 `AppId`는 절대 바꾸지 마세요.** 바꾸면 업그레이드가 아니라 별개 프로그램으로 설치돼요. 다른 불변 조건은 `AGENTS.md` 6장에 있어요.
+
+## 1. 버전 올리기
+
+세 곳을 **함께** 바꿔요.
+
+| 위치 | 바꿀 내용 |
+|---|---|
+| `pincapture.py`의 `APP_VERSION = "X.Y.Z"` | 큰따옴표, `=` 양쪽 공백 한 칸 형식을 그대로 유지해요. `build.py`와 CI가 정규식으로 읽어요 |
+| `pincapture.py` 맨 위 이력 주석 | `#   vX.Y.Z YYYY-MM-DD  <도구> (<모델>) — 요약` 한 줄을 추가하고, `Modified:` 줄의 날짜와 모델을 갱신해요 |
+| `CHANGELOG.md` | `[Unreleased]` 내용을 `## [X.Y.Z] - YYYY-MM-DD` 아래로 옮기고, 빈 `[Unreleased]`를 남겨요 |
+
+함께 확인할 것:
+- 동작이나 버튼 이름이 바뀌었으면 `installer/docs/사용법.txt`를 고쳐요(UTF-8 BOM + CRLF 유지. 확인 방법은 `AGENTS.md` 6장).
+- 의존성이 바뀌었으면 `requirements*.txt`, `installer/docs/THIRD_PARTY_NOTICES.txt`, `installer/docs/licenses/`를 고쳐요.
+- 화면 모양이 바뀌었으면 `docs/images/`를 다시 만들어요(`AGENTS.md` 9장).
+
+## 2. 시험
+
+```powershell
+py -3.13 -m pytest -q
+```
+
+모두 통과해야 해요. 소유자 PC에서 `Windows fatal exception: access violation`이 한 번 찍히는 건 환경 잡음이에요(`AGENTS.md` 8장).
+
+## 3. 로컬 빌드
+
+```powershell
+py -3.13 installer\build.py
+```
+
+`=== 1/5 icon`부터 `=== 5/5 Inno Setup`까지 진행되고, 아래 파일이 생겨요.
+
+| 파일 | 용도 |
+|---|---|
+| `installer\output\PinCapture-Setup-X.Y.Z.exe` | 설치 파일 |
+| `installer\output\PinCapture-Setup-X.Y.Z.sha256.txt` | SHA-256 |
+| `installer\output\PinCapture-Setup-X.Y.Z_배포안내.txt` | 배포 페이지나 메시지에 붙일 안내문(SmartScreen 대처 포함) |
+
+빌드가 멈추면 메시지로 원인을 찾아요.
+
+| 메시지 | 원인 |
+|---|---|
+| `APP_VERSION not found in pincapture.py` | 버전 줄 형식이 바뀌었어요 |
+| `bundle check failed: missing=[...] unexpected=[...]` | `PinCapture.spec`의 `DROP`과 `build.py`의 `MUST_HAVE`/`MUST_NOT`이 어긋났어요 |
+| `smoke test failed` | 빌드된 EXE의 `--selftest`(offscreen)가 실패했어요. `installer\build\smoke`에서 직접 실행해 보세요 |
+| `Inno Setup 6 (ISCC.exe) not found` | Inno Setup 6을 설치해요 |
+
+## 4. 깨끗한 Windows에서 수동 시험
+
+Python이 없는 Windows 10/11 x64(VM, Windows 샌드박스, 다른 계정)에서 해요. 설치 파일은 브라우저로 받아서, 인터넷에서 받은 파일 표시(MOTW)가 붙은 상태로 시험해요.
+단축키는 **반드시 실제 키보드로** 눌러요. pynput은 프로그램이 보낸 키 입력을 무시하므로 자동화할 수 없어요.
+
+| # | 항목 | 확인할 것 |
+|---|---|---|
+| 1 | 설치 | `_배포안내.txt`의 순서대로 브라우저 경고와 SmartScreen("추가 정보" → "실행")을 통과해요. UAC 창 없이 `%LOCALAPPDATA%\Programs\PinCapture`에 설치돼요. 마지막 화면의 "핀캡처 실행"으로 앱이 떠요 |
+| 2 | 바로가기 | 시작 메뉴에 `핀캡처`와 `핀캡처 사용법`이 있어요. 선택한 경우 바탕화면 바로가기가 있어요. `.lnk` 속성에서 대상은 `PinCapture.exe`, 시작 위치는 설치 폴더예요. 작업 표시줄에 고정 → 종료 → 고정 아이콘으로 다시 실행돼요 |
+| 3 | 트레이로 시작 | 자동 실행을 선택하고 로그오프 후 로그온(또는 재부팅)해요. 창 없이 트레이 아이콘만 떠요. `%USERPROFILE%\.pincapture\pincapture.log` 시작 줄에 새 버전과 `(exe)`가 찍혀요 |
+| 4 | 단축키(실제 키보드) | `Ctrl+Alt+A`, `Ctrl+Alt+W`, `Ctrl+Alt+F`, `Ctrl+Alt+Q`가 창이 숨겨진 상태에서도 동작해요. 설정 창의 단축키 그룹 제목에 "(현재 사용 불가)"가 없어요 |
+| 5 | 캡처 모드 | 영역: 드래그, 크기 표시, Esc·우클릭 취소. 창: 일부 가려진 창도 온전히 찍혀요. 전체: 마우스가 있는 모니터. 핀: 드래그 이동, 휠 크기 조절, 우클릭 메뉴, 더블클릭·Esc 닫기. 파일이 `사진\PinCapture`에 저장되고 `Ctrl+V`로 붙여 넣어져요. 트레이 메뉴와 창 버튼으로도 한 번씩 해 봐요 |
+| 6 | 화면 배율 | 가능하면 125%·150%와 다중 모니터에서 영역 캡처 크기가 실제 픽셀과 맞는지 확인해요 |
+| 7 | 실행 중 업그레이드(핀을 연 채로) | 이전 버전을 설치·실행하고 핀 2~3개를 띄운 다음 창을 트레이로 숨겨요. 새 설치 파일을 실행하면 "실행 중이라 설치할 수 없습니다" 없이 앱이 자동으로 닫혀요. 작업 관리자에 `PinCapture.exe`가 남지 않고, 설치 후 설정이 그대로예요. `PinCapture-Setup-X.Y.Z.exe /SILENT`로도 한 번 해 보고, 끝나면 앱이 트레이로 다시 떠요 |
+| 8 | 관리자 권한 인스턴스 | 핀캡처를 관리자 권한으로 실행한 채 설치 파일을 실행하면, 그 창에서 직접 종료하라는 안내가 나와요 |
+| 9 | 제거 | 시작 메뉴 `핀캡처` 우클릭 → 제거. 실행 중인 앱이 닫혀요. 바로가기(설정 창으로 만든 것 포함)가 사라지고, `~/.pincapture` 삭제를 물어요(기본값은 "아니요"). 저장한 캡처는 남아 있어요 |
+
+결과는 릴리스 메모나 PR에 짧게 남겨요. 실패한 항목이 있으면 배포하지 않아요.
+
+## 5. 태그 붙이고 푸시하기
+
+변경을 `main`에 푸시해서 CI가 초록색인지 먼저 확인한 다음 태그를 붙여요.
+
+```powershell
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+CI가 태그 `vX.Y.Z`와 `APP_VERSION`이 같은지 검사해요. 다르면 실패해요.
+
+## 6. CI 초안 릴리스 확인
+
+GitHub → Actions → `build` 실행이 끝나면 아래를 확인해요.
+
+- 실행 요약의 Artifacts에 `PinCapture-setup`이 있어요.
+- Releases에 **초안(Draft)** 릴리스가 생기고, `installer/output/*`(설치 파일, `.sha256.txt`, `_배포안내.txt`)가 첨부돼 있어요.
+
+## 7. 게시
+
+1. 초안 릴리스를 편집해요. 제목은 `핀캡처 X.Y.Z`로 해요.
+2. 본문에 **CI가 만든** `_배포안내.txt` 내용 전체와 `CHANGELOG.md`의 해당 버전 항목을 붙여요.
+   - PyInstaller 빌드는 바이트 단위로 재현되지 않아서, 로컬 빌드의 SHA-256은 CI 설치 파일과 달라요. 반드시 첨부된 파일 기준 값을 써요.
+   - 첨부 파일을 받아서 직접 확인해요: `Get-FileHash .\PinCapture-Setup-X.Y.Z.exe -Algorithm SHA256`
+3. 가능하면 설치 파일을 VirusTotal로 검사해요. 오탐이 나오면 게시 전에 백신사에 신고해요.
+4. "Publish release"를 눌러요. 이미 게시한 태그나 릴리스는 지우지 말고, 문제가 있으면 다음 패치 버전으로 고쳐요.
+
+## 8. CI 첫 실행 디버깅
+
+`.github/workflows/build.yml`은 2026-10-26에 작성됐고 **아직 GitHub에서 한 번도 실행되지 않았어요.** 첫 실행은 태그 없이 `main` 푸시(또는 PR)로 해서 초록색을 확인한 다음 태그를 붙여요.
+
+- 다시 실행: Actions → 해당 실행 → "Re-run jobs"
+- 수동 실행: Actions → `build` → "Run workflow"(`workflow_dispatch`, 워크플로 파일이 기본 브랜치에 있어야 보여요)
+- 브랜치에서 시험: 브랜치를 푸시하고 PR을 열면 `pull_request`로 돌아요(이때는 릴리스를 만들지 않아요).
+
+| 단계 | 실패할 수 있는 이유 | 할 일 |
+|---|---|---|
+| `Install dependencies` | 고정 버전 휠을 받지 못함 | pip 로그에서 패키지 이름을 확인해요. 버전은 소유자 승인 없이 바꾸지 않아요 |
+| `Tests` | 러너 환경 차이(offscreen, 키보드 훅, 시간 제한) | 실패한 테스트 이름과 출력을 확인해요. 로컬 `py -3.13 -m pytest -q`와 비교해요 |
+| `Tag must match APP_VERSION` | 태그와 `APP_VERSION`이 다름 | 잘못 붙인 태그는 `git push --delete origin vX.Y.Z`와 `git tag -d vX.Y.Z`로 지우고(아직 게시 전일 때만) 다시 붙여요 |
+| `Ensure Inno Setup 6` | `choco install innosetup` 실패, 또는 다른 경로에 설치됨 | `build.py`의 `find_iscc()`는 `%ProgramFiles(x86)%\Inno Setup 6` 등 정해진 경로와 `PATH`만 봐요. 로그에서 설치 경로를 확인해요 |
+| `Build installer` | 번들 검사, 연기 시험, `compiler:Languages\Korean.isl` 없음, BOM이 빠진 `.iss` | 3장 표를 보세요. 한국어 메시지 파일이 없다는 오류면 러너의 Inno Setup 버전을 확인해요 |
+| `upload-artifact` | `installer/output/`가 비어 있음 | 앞 단계 로그를 확인해요 |
+| `Draft release` | 권한 부족(403) | 저장소 Settings → Actions → General → Workflow permissions에서 쓰기 권한을 확인해요(워크플로에는 `contents: write`가 있어요) |
+| 릴리스 첨부 파일 이름 | 한글이 들어간 `_배포안내.txt` 이름이 GitHub에서 바뀔 수 있음 | 본문에 내용을 붙였으면 그 첨부 파일은 지워도 돼요 |
+
+첫 실행이 성공하면 `build.yml` 맨 위의 `Status: ... NOT yet run` 주석과 이 장 첫 문장을 고쳐요.

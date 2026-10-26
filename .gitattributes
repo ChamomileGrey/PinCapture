@@ -1,0 +1,14 @@
+# Inno Setup reads .iss as UTF-8 only with a BOM; keep CRLF + BOM exactly as committed.
+*.iss                     text eol=crlf
+# End-user documents installed with the app (opened in Notepad): CRLF, UTF-8 with BOM.
+installer/docs/*.txt      text eol=crlf
+installer/docs/licenses/* text eol=crlf
+
+*.py    text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.txt   text
+
+*.png   binary
+*.ico   binary
+*.exe   binary
