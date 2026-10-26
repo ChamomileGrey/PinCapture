@@ -2,7 +2,7 @@
 
 새 유지보수 담당자용 `pincapture.py` 지도. 앱 전체가 저장소 루트의 파일 하나(약 2,400줄)에 있다.
 
-- 작성 기준: `APP_VERSION = "0.6.1"` (2026-10-26). 내용이 코드와 다르면 **코드가 맞다**.
+- 작성 기준: `APP_VERSION = "0.7.0"` (2026-10-26). 내용이 코드와 다르면 **코드가 맞다**.
 - 줄 번호는 금방 바뀌므로 쓰지 않음. 함수·클래스 이름으로 찾을 것 (`Ctrl+F` / `grep -n "def 이름"`).
 - 아래 절 순서 = 파일 안의 순서.
 - 관련: 실행·빌드 안내 `docs/DEVELOPMENT.md` (일부 오래됨), 빌드 `installer/build.py`, 설치 스크립트 `installer/PinCapture.iss`, 시험 `tests/`.
@@ -102,6 +102,7 @@ flowchart LR
 | `show_viewer_after_capture` | `True` | `_finish` |
 | `hotkeys` | `region`/`window`/`full`/`pin` → `<ctrl>+<alt>+a`/`w`/`f`/`q` | `HotkeyManager.restart`, `_update_tooltips` |
 | `toolbar_pos` / `window_size` | `None` | `MainToolbar.__init__`, `_save_geometry` |
+| `welcome_seen` | `False` | 첫 실행 빠른 안내. `prepare_config()` 가 0.6.x 파일(키 없음)은 `True` 로 저장해 안내를 다시 띄우지 않음 |
 
 `main()` 은 시작할 때 `load_config()` 직후 `save_config()` 를 불러 파일을 만든다. 창 위치·크기는 숨길 때·종료·다시 시작 때 `_save_geometry()` 가 저장.
 
@@ -225,9 +226,12 @@ Qt 플랫폼이 `windows` 가 아니면(offscreen 등) 바로 `False` — `winId
 
 ---
 
-## 11. 설정 창: `SettingsDialog`
+## 11. 설정 창: `SettingsDialog` / 안내·정보
 
-- `SettingsDialog(cfg, hotkey_ok, parent)`: 그룹 "저장"(폴더·접두어·형식·JPG 품질), "캡처 동작"(체크박스 7개, 키와 1:1), "바로가기"(`create_shortcut` 버튼 2개), "전역 단축키"(모드별 입력칸, 기본값 복원).
+- `WelcomeDialog(cfg)`: 단축키(`hotkey_label` 로 `Ctrl+Alt+A` 처럼 표시)와 핀 사용법. 후원 버튼은 없다.
+- `AboutDialog`: 버전, `APP_PUBLISHER` / `APP_PUBLISHER_EN`, 라이선스 요약, `third_party_notices_path()` 열기, `open_kofi()` (`KOFI_URL` = `https://ko-fi.com/chamomilegrey`).
+- `prepare_config()` / `should_auto_welcome()`: 첫 실행에만 안내를 자동으로 연다. `--tray` 이고 트레이가 있으면 열지 않는다.
+- `SettingsDialog(cfg, hotkey_ok, parent)`: 왼쪽 "저장"(폴더·접두어·형식·JPG 품질)과 "바로가기", 오른쪽 "캡처할 때"(체크박스 7개, 키와 1:1), 아래 "전역 단축키"(모드별 입력칸, 기본값 복원).
 - `_accept()`: pynput 이 있으면 `keyboard.HotKey.parse` 로 단축키 검사 → 통과하면 **`cfg` 사전을 그 자리에서 수정**하고 `accept()`. 취소하면 `cfg` 는 그대로.
 - 저장과 단축키 재등록은 호출한 쪽(`MainToolbar.open_settings`)이 한다.
 
@@ -250,17 +254,17 @@ Qt 플랫폼이 `windows` 가 아니면(offscreen 등) 바로 `False` — `winId
 
 ### 12.2 UI (`_build_ui`)
 
-- 위: 캡처 버튼 줄 (`btn_region`, `btn_window`, `btn_full`, 구분선, `btn_pin`, 오른쪽 `btn_settings` = `_title_btn("gear", …)`).
-- 가운데: 보관함 동작 줄 (`b_copy`, `b_save`, `b_pin_sel`, `b_folder`, 오른쪽 `b_remove`).
+- 위: 제목과 `btn_help`(빠른 안내), `btn_about`(정보), `btn_settings`. 그 아래 캡처 버튼 줄 (`btn_region`, `btn_window`, `btn_full`, 구분선, `btn_pin`).
+- 가운데: 보관함 설명과 동작 줄 (`b_copy`, `b_save`, `b_pin_sel`, `b_folder`, 오른쪽 `b_remove`).
 - 아래: `QSplitter(preview, listw)`. `listw` 는 아이콘 모드 `QListWidget`, `ExtendedSelection`(Ctrl/Shift/드래그 다중 선택).
 - `QShortcut` 3개 (`WidgetWithChildrenShortcut`): `Copy` → `_copy_selected`, `Delete` → `_remove_selected`, `SelectAll` → `listw.selectAll` (리스트 기본 Ctrl+C 텍스트 복사를 덮어씀).
 - 맨 아래 `info` 라벨 (`_refresh_info`).
-- 스타일시트는 `_build_ui`, `ToolButton`, `_title_btn` 에 직접 있음.
+- 스타일시트는 `_build_ui`, `ToolButton`, `_header_btn` 에 직접 있음.
 - `_update_tooltips()`: 캡처 버튼 툴팁에 현재 단축키 표시.
 
 ### 12.3 트레이와 창 동작
 
-- `_build_tray()`: 메뉴 = 캡처 4종 / 창 보이기·숨기기 / 설정 / 다시 시작 / 종료. 클릭·더블클릭(`_on_tray_activated`) = `_toggle_window`. `QSystemTrayIcon.isSystemTrayAvailable()` 가 거짓이면(offscreen) `_tray` 는 `None` — 트레이를 쓰는 코드는 `None` 을 확인할 것.
+- `_build_tray()` / `_tray_menu()`: 창 열기·숨기기 / 캡처 4종 / 빠른 안내·설정·정보·후원하기 / 다시 시작 / 종료. 후원하기는 `open_kofi()` 만 호출한다. 클릭·더블클릭(`_on_tray_activated`) = `_toggle_window`. `QSystemTrayIcon.isSystemTrayAvailable()` 가 거짓이면(offscreen) `_tray` 는 `None` — 트레이를 쓰는 코드는 `None` 을 확인할 것. 메뉴 구성은 `_tray_menu()` 로 트레이 없이도 만들 수 있다.
 - `closeEvent`: 트레이가 있으면 닫지 않고 숨김 + 첫 번째만 안내 알림. 없으면 `quit_app()`.
 - `keyPressEvent`: `Esc` = 숨김 (트레이가 있을 때).
 - `_bring_to_front(_retry=3)`: `show` → `raise_` → Windows 면 `force_foreground`, 실패 시 150 ms 뒤 재시도 → `activateWindow`.
@@ -332,7 +336,7 @@ _on_hotkey / 버튼 / 트레이 / --region 등
 
 ## 13. 자가 점검: `run_selftest()`
 
-- 현재 폴더의 `selftest_out/` 에 `main.png`, `settings.png`, `pin.png`, `overlay.png` 저장 (더미 캡처 3개, 더미 정지 화면).
+- 현재 폴더의 `selftest_out/` 에 `main.png`, `settings.png`, `welcome.png`, `about.png`, `pin.png`, `overlay.png` 저장 (더미 캡처 3개, 더미 정지 화면).
 - 오버레이 좌표 변환과 200% DPI 변환(`dpi_mapping_ok` / `dpi_mapping_FAIL`)을 출력.
 - 단축키 상태(`available`, `listener_alive`, `error`), 버전, `FROZEN`, `launch_argv`, `relaunch_command`, `app_dir`, 아이콘 경로를 출력.
 - 쓰는 곳: `installer/build.py` 의 빌드 후 연기 시험(EXE, offscreen), `tests/test_process.py`, `docs/images/` 스크린샷.
@@ -509,7 +513,7 @@ sequenceDiagram
 | **단축키 형식·파싱** | 형식은 pynput 문법(`<ctrl>+<alt>+a`). 등록·건너뛰기: `HotkeyManager.restart` (`keyboard.HotKey.parse`, `keyboard.GlobalHotKeys`). 입력 검사: `SettingsDialog._accept`. 안내 문구: `SettingsDialog.__init__` 의 placeholder·`tip`. 기본값: `DEFAULTS["hotkeys"]`. 표시: `_update_tooltips`(문자열 그대로) |
 | **pynput → Win32 `RegisterHotKey` 교체** (검토 중) | `HotkeyManager` 만 교체하고 겉모양 유지: `triggered(str)`, `available`, `error`, `restart(dict)`, `stop()`, `_listener.is_alive()`(`run_selftest` 가 씀). 기존 설정 파일의 pynput 형식 문자열을 계속 읽거나 변환할 것. 함께: `requirements.txt`, `PinCapture.spec` 의 `module_collection_mode`, `build.py` `MUST_HAVE` 의 `_internal/pynput/keyboard/_win32.py`, `THIRD_PARTY_NOTICES.txt`·`licenses/`(pynput LGPL, six), `_find_python_with_deps`·`_handle_missing_deps` 의 pynput 언급 |
 | **앱 버전** | `APP_VERSION` 한 곳 + 파일 맨 위 주석 이력. 태그는 `vX.Y.Z` 가 `APP_VERSION` 과 같아야 CI 통과 |
-| **색·스타일** | 색 상수(`ACCENT` 등)와 `_build_ui`·`ToolButton`·`_title_btn` 의 스타일시트. 미리보기 배경·오버레이 어둡기는 `PreviewPane.paintEvent`·`SelectionOverlay.paintEvent` 에 직접 |
+| **색·스타일** | 색 상수(`ACCENT` 등)와 `_build_ui`·`ToolButton`·`_header_btn` 의 스타일시트. 미리보기 배경·오버레이 어둡기는 `PreviewPane.paintEvent`·`SelectionOverlay.paintEvent` 에 직접 |
 | **앱 아이콘** | `make_app_icon`. 소스 실행은 `~/.pincapture/pincapture.ico` 를 한 번만 만들므로 바꾼 뒤 그 파일을 지워야 바로가기·작업 표시줄에 반영. EXE 아이콘은 다시 빌드 |
 | **저장 파일 이름** | `MainToolbar._save_image` (일괄 저장·임시 복사 파일 이름은 `_save_selected_as`, `_copy_selected`) |
 | **보관함 개수** | 시작 시 불러오는 수: `_scan_existing_files` (60). 최대 보관: `_trim_history` (150). 썸네일 폭: `HistoryEntry.THUMB_W` |

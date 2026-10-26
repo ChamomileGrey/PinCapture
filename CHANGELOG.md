@@ -6,6 +6,25 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-26
+
+### 추가
+- 첫 실행 빠른 안내: 단축키와 핀 사용법을 보여 줘요. 설정 파일이 없을 때만 자동으로 열리고, 창을 닫으면 `welcome_seen` 으로 기억해요. Windows 시작 시 `--tray` 로 켜질 때는 띄우지 않아요. 트레이 메뉴의 **빠른 안내**와 메인 창의 **안내**에서 언제든 다시 볼 수 있어요.
+- 정보 창: 버전, 캐모마일그레이(ChamomileGrey), 라이선스 요약(All rights reserved, 무료 사용, 코드 재배포 불가), 서드파티 고지 열기.
+- 후원하기: 정보 창과 트레이 메뉴에서 기본 브라우저로 https://ko-fi.com/chamomilegrey 를 열어요. 실행을 가로채는 후원 창은 없어요.
+- 시험 `tests/test_ui.py`: 안내·정보·후원 주소, 단축키 표기, 기존 설정 파일 호환.
+
+### 변경
+- 메인 창과 설정 창의 배치·문구·툴팁을 다듬었어요. 캡처 버튼과 보관함 동작을 나누고, 버튼에 아이콘과 설명을 달았어요.
+- 트레이 메뉴를 창 열기/숨기기, 캡처, 안내·설정·정보·후원, 다시 시작·종료로 나눴어요.
+- 고친 창의 문구를 해요체로 맞췄어요. 설정 키 이름과 `config.json` 형식은 그대로예요. `welcome_seen` 만 추가되고, 0.6.x 파일에는 그 키가 없으면 안내를 자동으로 띄우지 않아요.
+- 설치 정보의 게시자 이름과 EXE 회사 이름을 `ChamomileGrey`로 맞췄어요(`installer/PinCapture.iss`, `installer/build.py`).
+- CI 워크플로 `.github/workflows/build.yml` 를 다시 넣었어요. Inno Setup 설치가 재부팅 코드 3010 을 내도 성공으로 보고, `Korean.isl` 이 있는지도 확인해요.
+
+### 수정
+- 시험이 모두 통과한 뒤 PySide6 정적 소멸자에서 프로세스가 죽던 문제를 막았어요. `tests/conftest.py`가 요약을 출력한 다음 pytest 종료 코드로 끝나요. Windows CI는 그 충돌을 종료 코드 1로 보고 시험 실패로 오해했어요.
+- 설치 빌드가 Windows CI의 cp1252 콘솔에서 `_배포안내.txt` 경로를 출력하다 `UnicodeEncodeError`로 죽던 문제를 막았어요. `installer/build.py`가 표준 출력을 UTF-8로 맞추고, CI 잡에 `PYTHONIOENCODING=utf-8`을 넣었어요.
+
 ## [0.6.1] - 2026-10-26
 
 ### 추가

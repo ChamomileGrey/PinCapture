@@ -82,4 +82,4 @@ def test_keyboard_shortcuts(pc, toolbar, tmp_path):
     assert md.hasUrls() and len(md.urls()) == 4                      # files, not item text
     QTest.keyClick(L, Qt.Key.Key_Delete)
     assert L.count() == 0 and not toolbar.history
-    assert "아직 캡처가 없어" in toolbar.info.text()
+    assert "아직 캡처가 없어요" in toolbar.info.text()

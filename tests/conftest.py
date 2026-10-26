@@ -67,3 +67,42 @@ def toolbar(pc, tmp_path, monkeypatch):
         box.hide()
     tb.hide()
     spin(50)
+
+
+# pytest's verdict, captured once the session has actually run.
+# None means we never got that far (usage error, --help) and must exit normally.
+_session = None
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Remember the session so pytest_unconfigure can leave with its final code.
+
+    `exitstatus` is the value when this hook starts. The terminal reporter may
+    still adjust `session.exitstatus` afterwards, so the hard exit reads that.
+    """
+    global _session
+    _session = session
+    del exitstatus
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    """Stop before Qt's C++ static destructors run.
+
+    The summary is already printed: the terminal reporter writes it from a
+    pytest_sessionfinish wrapper, and that hook finishes before unconfigure.
+    A normal process exit then finalizes Python and libc runs Qt's static
+    destructors. Those call back into shiboken (_PyErr_Fetch) and segfault.
+    Every test has passed, but the process dies — Linux exit 139, and GitHub
+    Actions' pwsh wrapper reports the Windows crash as exit code 1.
+
+    os._exit keeps pytest's own code and skips atexit plus those destructors.
+    Do not remove this. Real failures still propagate: the code is session.exitstatus.
+    """
+    del config
+    if _session is None:
+        return
+    code = int(getattr(_session, "exitstatus", 0))
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(code)

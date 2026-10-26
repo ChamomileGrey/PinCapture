@@ -1,9 +1,12 @@
-# PinCapture installer build — v0.6.0 — one command from source to setup.exe
+# PinCapture installer build — v0.7.0 — one command from source to setup.exe
 # Created: 2026-10-22 by Claude Opus 5.5 via Claude Code
 # Install path: D:/Tools/PinCapture/installer/build.py
 # Changelog:
 #   v0.6.0 2026-10-22 Claude Opus 5.5 — first version: icon -> version resource -> PyInstaller onedir
 #                     -> bundle check -> smoke test -> Inno Setup -> SHA-256 + release note (배포안내.txt)
+#   v0.7.0 2026-10-26 Grok 4.7 — publisher/company is ChamomileGrey (kept in sync with PinCapture.iss)
+#                     stdout/stderr forced to UTF-8 so the Korean release-note name
+#                     prints on a cp1252 CI console
 """
 Build PinCapture-Setup-<version>.exe.
 
@@ -29,13 +32,30 @@ import subprocess
 import sys
 from pathlib import Path
 
+
+def configure_stdio_stream(stream) -> None:
+    """Encode text as UTF-8. A cp1252 console raises UnicodeEncodeError on 배포안내."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        return
+
+
+def configure_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        configure_stdio_stream(stream)
+
+
 HERE = Path(__file__).resolve().parent          # installer/
 ROOT = HERE.parent                              # project root
 SRC = ROOT / "pincapture.py"
 BUILD = HERE / "build"
 OUT = HERE / "output"
 ICON_SIZES = [16, 20, 24, 32, 40, 48, 64, 96, 128, 256]
-PUBLISHER = "PinCapture"                        # shown in EXE properties; keep in sync with PinCapture.iss
+PUBLISHER = "ChamomileGrey"                     # shown in EXE properties; keep in sync with PinCapture.iss
 
 
 def step(msg: str) -> None:
@@ -86,7 +106,7 @@ VSVersionInfo(
         StringStruct('FileDescription', '핀캡처 화면 캡처'),
         StringStruct('FileVersion', '{ver}'),
         StringStruct('InternalName', 'PinCapture'),
-        StringStruct('LegalCopyright', 'Copyright (C) 2026'),
+        StringStruct('LegalCopyright', 'Copyright (C) 2026 ChamomileGrey'),
         StringStruct('OriginalFilename', 'PinCapture.exe'),
         StringStruct('ProductName', '핀캡처 (PinCapture)'),
         StringStruct('ProductVersion', '{ver}')])
@@ -170,6 +190,7 @@ def smoke_test(exe: Path) -> None:
 
 
 def main() -> None:
+    configure_stdio()
     no_setup = "--no-setup" in sys.argv
     ver = app_version()
     print(f"PinCapture {ver}")

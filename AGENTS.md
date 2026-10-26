@@ -6,7 +6,7 @@
 ## 1. 프로젝트 한 줄 요약
 
 핀캡처(PinCapture)는 PySide6로 만든 Windows 10/11 x64용 화면 캡처 트레이 앱이에요. 영역·창·전체 화면 캡처, 화면 위 핀 고정, 보관함, 전역 단축키를 제공해요.
-소스는 `pincapture.py` 한 파일이고, 배포는 PyInstaller onedir + Inno Setup 설치 파일로 해요. 버전은 `pincapture.py`의 `APP_VERSION`(현재 `0.6.1`) 한 곳에서만 관리해요.
+소스는 `pincapture.py` 한 파일이고, 배포는 PyInstaller onedir + Inno Setup 설치 파일로 해요. 버전은 `pincapture.py`의 `APP_VERSION`(현재 `0.7.0`) 한 곳에서만 관리해요.
 
 ## 2. 저장소 지도
 
@@ -23,7 +23,7 @@
 | `installer/docs/사용법.txt` | 최종 사용자 안내. 앱과 함께 설치돼요 | UTF-8 BOM + CRLF |
 | `installer/docs/THIRD_PARTY_NOTICES.txt`, `installer/docs/licenses/` | 오픈소스 고지, 라이선스 전문. `Qt-third-party.txt`는 Qt 6.11.2 `qt_attribution.json`에서 생성한 원문 | UTF-8 BOM + CRLF |
 | `installer/build/`, `installer/output/` | 빌드 산출물 | gitignore |
-| `.github/workflows/build.yml` | CI: 시험 → 빌드 → 아티팩트, 태그면 초안 릴리스 | GitHub에서 아직 한 번도 실행되지 않음 |
+| `.github/workflows/build.yml` | CI: 시험 → 빌드 → 아티팩트, 태그면 초안 릴리스 | 0.7.0에서 복구. 시험은 통과인데 단계만 실패하면 `tests/conftest.py`의 종료 처리를 먼저 봐요 |
 | `.gitignore`, `.gitattributes` | `.gitattributes`가 `.iss`와 `installer/docs/*.txt`의 CRLF를 지켜요 | |
 | `README.md`, `CHANGELOG.md`, `GROK.md` | 소개, 변경 기록, Grok용 요약 | |
 | `docs/` | 개발 문서(10장 참고). `docs/images/screenshot-*.png`는 README용 | |
@@ -43,10 +43,10 @@
 
 | 목적 | 명령 | 결과 |
 |---|---|---|
-| 시험(작업을 끝낼 때마다) | `py -3.13 -m pytest -q` | `19 passed`, 약 10초(2026-10-26 기준) |
+| 시험(작업을 끝낼 때마다) | `py -3.13 -m pytest -q` | `29 passed`, 약 10초(2026-10-26, Windows CI 기준) |
 | 설치 파일 빌드 | `py -3.13 installer\build.py` | `installer\output\PinCapture-Setup-<버전>.exe`, `.sha256.txt`, `_배포안내.txt` |
 | 앱 폴더까지만 빌드 | `py -3.13 installer\build.py --no-setup` | `installer\build\dist\PinCapture\`(Inno Setup 없이도 됨) |
-| 버전 확인 | `py -3.13 pincapture.py --version` | `핀캡처 0.6.1` |
+| 버전 확인 | `py -3.13 pincapture.py --version` | `핀캡처 0.7.0` |
 | 소스로 실행(소유자 확인 후) | `py -3.13 pincapture.py`, 콘솔 없이 실행하려면 `pyw -3.13 pincapture.py` | 창과 트레이 아이콘 |
 
 명령줄 옵션은 아래와 같아요. 모르는 인수는 무시해요(`parse_known_args`).
@@ -114,7 +114,7 @@ py -3.13 -c "import sys,pathlib;p=pathlib.Path(sys.argv[1]);p.write_text(p.read_
 | 항목 | 현재 상태 | 영향받는 곳 |
 |---|---|---|
 | 앱 코드의 라이선스 | 없음(`LICENSE` 파일 없음). MIT를 추천해요 | 공개 저장소에 라이선스가 없으면 남이 쓸 권리가 없어요. `README.md`, 고지 문서 |
-| 게시자 이름 | 임시값 `"PinCapture"` | `installer/PinCapture.iss`의 `#define AppPublisher`와 `installer/build.py`의 `PUBLISHER`(둘을 함께 바꿔요). EXE 속성과 앱 목록에 표시돼요 |
+| 게시자 이름 | `ChamomileGrey` (0.7.0에서 정함. 한글 표기는 정보 창의 캐모마일그레이) | `installer/PinCapture.iss`의 `#define AppPublisher`와 `installer/build.py`의 `PUBLISHER`(둘을 함께 바꿔요). EXE 속성과 앱 목록에 표시돼요. 다시 바꿀 때는 소유자에게 확인해요 |
 | 코드 서명 | 없음 | SmartScreen 경고가 떠요(안내는 `_배포안내.txt`, `사용법.txt` 4장). Windows 11 스마트 앱 컨트롤이 켜진 PC에서는 설치가 막혀요 |
 | GitHub 소유자·저장소 이름 | 미정 | README 링크, CHANGELOG 비교 링크, 사용자 문의처 |
 | pynput을 Win32 `RegisterHotKey`로 바꿀지 | 미정(`docs/reviews/2026-10-22-release-review.md` 2번) | 단축키 코드, LGPL 고지, spec의 `module_collection_mode`, `build.py`의 `MUST_HAVE`, 관리자 권한 창 위에서의 단축키 동작 |
@@ -124,6 +124,7 @@ py -3.13 -c "import sys,pathlib;p=pathlib.Path(sys.argv[1]);p.write_text(p.read_
 | 현상 | 원인 | 대처 |
 |---|---|---|
 | pytest 도중 `Windows fatal exception: access violation`이 한 번 출력되지만 시험은 모두 통과 | 소유자 PC의 Teruten WebCube(`T_Prevent64.dll`, 정부24 ezPDFReader 2.0G와 함께 설치됨)가 실행 중인 프로세스에 주입돼요. faulthandler가 그 예외를 출력해요 | 무시해도 돼요. 실패한 테스트가 있을 때만 조사하세요 |
+| pytest가 `N passed`를 찍은 뒤 프로세스가 죽어요. Linux는 SIGSEGV(139), Windows CI는 종료 코드 1로만 보여요 | `QApplication`이 파이썬 종료 뒤에 돌아가는 Qt 정적 소멸자에서 shiboken을 호출해요. 로그에 예외 문장이 없을 수 있어요 | `tests/conftest.py`가 요약을 찍은 다음 pytest 종료 코드로 `os._exit` 해요. 이 종료를 지우지 마세요. 위의 Teruten 한 줄과는 다른 현상이에요 |
 | 그 뷰어가 열려 있는 동안 모든 GDI 화면 캡처가 완전한 검정 | 같은 원인 | 앱은 0.6.1부터 감지하고 안내해요. 수동 확인 전에 뷰어를 닫거나 재부팅하세요. 우회 코드는 금지예요(6장 6번) |
 | 단축키 자동 시험이 안 됨 | pynput은 주입된 키 입력(`SendInput` 등)을 무시해요 | 단축키는 사람이 실제 키보드로 확인해요(`docs/RELEASE.md` 수동 시험) |
 | offscreen 스크린샷에 글자가 없음 | `QT_QPA_PLATFORM=offscreen`에는 글꼴이 없어요 | 구조 확인용으로는 충분해요. README 스크린샷은 실제 Windows 플랫폼에서 만들어요(9장) |

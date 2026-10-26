@@ -1,5 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PinCapture PyInstaller spec (onedir). Called by installer/build.py.
+# PinCapture PyInstaller spec (onedir), app version 0.7.0.
+# The version number itself is APP_VERSION in pincapture.py; build.py reads it.
+# Called by installer/build.py.
 # Manual build: py -3.13 -m PyInstaller --noconfirm --distpath build/dist --workpath build/work PinCapture.spec
 #   (run from the installer/ folder after build.py has generated build/pincapture.ico and build/version_info.txt)
 import os

@@ -51,7 +51,7 @@ def test_selftest_renders_every_window(tmp_path):
                        text=True, encoding="utf-8", env=_env(tmp_path), timeout=120)
     assert r.returncode == 0, r.stderr[-800:]
     pngs = sorted(p.name for p in (tmp_path / "selftest_out").glob("*.png"))
-    assert pngs == ["main.png", "overlay.png", "pin.png", "settings.png"]
+    assert pngs == ["about.png", "main.png", "overlay.png", "pin.png", "settings.png", "welcome.png"]
 
 
 def test_launch_argv_script_mode(pc):

@@ -19,7 +19,9 @@
 #                      중복 실행 방지 채널을 사용자·세션별로 분리
 #   v0.6.1 2026-10-26  Claude Code (Claude Opus 5.5) — 화면 캡처가 통째로 검게 나올 때(보안 프로그램의
 #                      '화면 캡처 방지' 등) 검은 화면을 모니터에 띄우거나 저장하지 않고 원인·해결법 안내
-#   Created: 2026-08-04 by Claude via claude.ai / Modified: 2026-10-26 by Claude Opus 5.5 via Claude Code
+#   v0.7.0 2026-10-26  Grok (Grok 4.7) — 메인·설정 창 문구와 배치를 다듬고, 첫 실행 빠른 안내·정보 창·
+#                      트레이 메뉴를 정리. 정보 창과 트레이에 후원하기(Ko-fi). 설정 파일 형식은 그대로
+#   Created: 2026-08-04 by Claude via claude.ai / Modified: 2026-10-26 by Grok 4.7 via Cursor
 #   빌드: installer/build.py  (PyInstaller onedir + Inno Setup → PinCapture-Setup-<버전>.exe)
 """
 핀캡처 (PinCapture) — 화면 캡처 도구
@@ -51,7 +53,10 @@ IS_WINDOWS = sys.platform == "win32"
 _NO_WINDOW = 0x08000000 if IS_WINDOWS else 0   # subprocess.CREATE_NO_WINDOW
 
 APP_NAME = "핀캡처"
-APP_VERSION = "0.6.1"
+APP_VERSION = "0.7.0"
+APP_PUBLISHER = "캐모마일그레이"                 # 정보 창에 보이는 이름
+APP_PUBLISHER_EN = "ChamomileGrey"             # 설치 정보·EXE 속성과 같은 영문 이름
+KOFI_URL = "https://ko-fi.com/chamomilegrey"   # 후원하기. 이 주소만 연다
 APP_USER_MODEL_ID = "pincapture.app"           # 작업 표시줄 그룹/고정 식별자 (설치 프로그램 바로가기와 동일해야 함)
 APP_MUTEX_NAME = "PinCaptureRunning"           # 설치 프로그램이 '실행 중' 여부를 확인하는 뮤텍스 (PinCapture.iss 와 동일)
 FROZEN = bool(getattr(sys, "frozen", False))   # PyInstaller 로 만든 EXE 로 실행 중인지
@@ -255,7 +260,7 @@ from PySide6.QtCore import (
     QStandardPaths, QTimer, QUrl, Signal,
 )
 from PySide6.QtGui import (
-    QBrush, QColor, QCursor, QDesktopServices, QFont, QGuiApplication, QIcon,
+    QBrush, QColor, QCursor, QDesktopServices, QFont, QFontDatabase, QGuiApplication, QIcon,
     QImage, QImageReader, QKeySequence, QPainter, QPen, QPixmap, QShortcut,
 )
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -263,7 +268,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListView,
-    QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton, QSpinBox,
+    QGridLayout, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton, QSpinBox,
     QSplitter, QSystemTrayIcon, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -331,6 +336,7 @@ DEFAULTS = {
     },
     "toolbar_pos": None,               # 창 위치 [x, y]
     "window_size": None,               # 창 크기 [w, h]
+    "welcome_seen": False,             # 첫 실행 빠른 안내를 닫았는지. 0.6.x 파일에는 없음
 }
 
 
@@ -357,6 +363,120 @@ def save_config(cfg: dict) -> None:
         CONFIG_PATH.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
         print(f"[config] 저장 실패: {e}")
+
+
+def prepare_config() -> dict:
+    """설정을 읽고, 첫 실행과 업그레이드를 구분한 뒤 저장한다.
+
+    welcome_seen 은 0.7.0 에서 추가됐다. 키가 없는 기존 파일은 이미 쓰던 사람으로 보고
+    빠른 안내를 자동으로 띄우지 않는다. 파일이 없으면 첫 실행이다.
+    그 밖의 키는 load_config 가 기본값과 합치고, 모르는 키도 그대로 둔다.
+    """
+    fresh = not CONFIG_PATH.is_file()
+    prior_keys: set = set()
+    if not fresh:
+        try:
+            data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                prior_keys = set(data)
+        except Exception:
+            prior_keys = set()
+    cfg = load_config()
+    if "welcome_seen" not in prior_keys:
+        cfg["welcome_seen"] = False if fresh else True
+    save_config(cfg)
+    return cfg
+
+
+def should_auto_welcome(cfg: dict, start_in_tray: bool, tray_available: bool) -> bool:
+    """첫 실행 안내를 지금 자동으로 열지.
+
+    이미 본 경우와, Windows 시작 시 --tray 로 켜진 경우에는 작업을 끊지 않는다.
+    트레이가 없는 환경은 --tray 여도 창이 뜨므로 안내를 보여 준다.
+    """
+    if cfg.get("welcome_seen"):
+        return False
+    if start_in_tray and tray_available:
+        return False
+    return True
+
+
+def hotkey_label(combo: str) -> str:
+    """pynput 형식(<ctrl>+<alt>+a)을 화면에 보일 표기(Ctrl+Alt+A)로 바꾼다."""
+    if not combo or not str(combo).strip():
+        return "없음"
+    names = {
+        "ctrl": "Ctrl", "control": "Ctrl", "alt": "Alt", "alt_gr": "AltGr",
+        "shift": "Shift", "cmd": "Win", "super": "Win", "win": "Win",
+        "print_screen": "PrintScreen", "esc": "Esc", "escape": "Esc",
+        "space": "Space", "tab": "Tab", "enter": "Enter", "backspace": "Backspace",
+    }
+    out = []
+    for part in str(combo).split("+"):
+        raw = part.strip()
+        if not raw:
+            continue
+        key = raw[1:-1] if (raw.startswith("<") and raw.endswith(">") and len(raw) > 2) else raw
+        key_l = key.lower()
+        if key_l in names:
+            out.append(names[key_l])
+        elif len(key) == 1:
+            out.append(key.upper())
+        else:
+            out.append(key.replace("_", " ").title().replace(" ", ""))
+    return "+".join(out) if out else "없음"
+
+
+def third_party_notices_path() -> Path:
+    """설치본은 프로그램 폴더, 소스 실행은 installer/docs 의 고지 파일."""
+    bundled = app_dir() / "THIRD_PARTY_NOTICES.txt"
+    if bundled.is_file():
+        return bundled
+    return app_dir() / "installer" / "docs" / "THIRD_PARTY_NOTICES.txt"
+
+
+def open_kofi() -> None:
+    """기본 브라우저로 후원 페이지만 연다. 앱 안에 창을 띄우지 않는다."""
+    QDesktopServices.openUrl(QUrl(KOFI_URL))
+
+
+def apply_ui_font(app=None) -> None:
+    """한글이 있는 환경의 고딕을 고른다. 없으면 Qt 기본 글꼴을 그대로 쓴다."""
+    app = app or QApplication.instance()
+    if app is None:
+        return
+    families = set(QFontDatabase.families())
+    for name in ("Malgun Gothic", "맑은 고딕", "Noto Sans CJK KR", "Noto Sans CJK JP", "Noto Sans KR"):
+        if name in families:
+            app.setFont(QFont(name, 10))
+            return
+
+
+def _polish_dialog(dlg: QDialog) -> None:
+    dlg.setStyleSheet(f"""
+        QDialog {{ background: white; color: {TEXT}; }}
+        QGroupBox {{
+            font-weight: 600; border: 1px solid {BORDER}; border-radius: 8px;
+            margin-top: 14px; padding: 14px 12px 10px 12px; background: {BG};
+        }}
+        QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 6px; color: {TEXT}; }}
+        QLabel {{ color: {TEXT}; }}
+        QLineEdit, QComboBox, QSpinBox {{
+            padding: 4px 8px; border: 1px solid {BORDER}; border-radius: 6px;
+            background: white; min-height: 22px;
+        }}
+        QCheckBox {{ spacing: 8px; padding: 3px 0; }}
+        QPushButton {{
+            padding: 6px 14px; border: 1px solid {BORDER}; border-radius: 6px;
+            background: white; color: {TEXT};
+        }}
+        QPushButton:hover {{ background: #EDF3FE; }}
+        QPushButton:disabled {{ color: {TEXT_SUB}; background: #F3F5F8; }}
+        QPushButton#primary {{
+            background: {ACCENT}; color: white; border: 1px solid {ACCENT_DARK}; font-weight: 600;
+        }}
+        QPushButton#primary:hover {{ background: {ACCENT_DARK}; }}
+    """)
 
 
 # ---------------------------------------------------------------------------
@@ -447,11 +567,67 @@ def _draw_list(p: QPainter, s: int, c: QColor):
         p.drawLine(round(s * 0.42), y, round(s * 0.80), y)
 
 
+def _draw_help(p: QPainter, s: int, c: QColor):
+    p.drawEllipse(QPointF(s / 2, s / 2), s / 2 - 3.2, s / 2 - 3.2)
+    p.setBrush(QBrush(c))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(QPointF(s / 2, s * 0.72), 1.15, 1.15)
+    pen = QPen(c)
+    pen.setWidthF(1.7)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawArc(int(s * 0.32), int(s * 0.22), int(s * 0.36), int(s * 0.32), 30 * 16, 280 * 16)
+    p.drawLine(QPointF(s / 2, s * 0.52), QPointF(s / 2, s * 0.60))
+
+
+def _draw_info(p: QPainter, s: int, c: QColor):
+    p.setBrush(Qt.BrushStyle.NoBrush)
+    p.drawEllipse(QPointF(s / 2, s / 2), s / 2 - 3.2, s / 2 - 3.2)
+    p.setBrush(QBrush(c))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(QPointF(s / 2, s * 0.34), 1.2, 1.2)
+    pen = QPen(c)
+    pen.setWidthF(1.8)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    p.setPen(pen)
+    p.drawLine(QPointF(s / 2, s * 0.48), QPointF(s / 2, s * 0.72))
+
+
+def _draw_copy(p: QPainter, s: int, c: QColor):
+    p.drawRoundedRect(8, 8, s - 13, s - 13, 2, 2)
+    p.drawRoundedRect(4, 4, s - 13, s - 13, 2, 2)
+
+
+def _draw_folder(p: QPainter, s: int, c: QColor):
+    p.drawLine(4, 9, 9, 9)
+    p.drawLine(9, 6, 13, 9)
+    p.drawRoundedRect(3, 9, s - 6, s - 13, 2, 2)
+
+
+def _draw_save(p: QPainter, s: int, c: QColor):
+    mid = s / 2
+    p.drawLine(QPointF(mid, 4), QPointF(mid, s - 8))
+    p.drawLine(QPointF(mid - 4, s - 12), QPointF(mid, s - 8))
+    p.drawLine(QPointF(mid + 4, s - 12), QPointF(mid, s - 8))
+    p.drawLine(QPointF(4, s - 4), QPointF(s - 4, s - 4))
+
+
+def _draw_trash(p: QPainter, s: int, c: QColor):
+    p.drawLine(5, 7, s - 5, 7)
+    p.drawLine(9, 5, s - 9, 5)
+    p.drawRect(7, 8, s - 14, s - 13)
+    p.drawLine(10, 11, 10, s - 7)
+    p.drawLine(s - 10, 11, s - 10, s - 7)
+
+
 def make_icon(kind: str, color: str = TEXT, size: int = 24) -> QIcon:
     fn = {
         "region": _draw_region, "window": _draw_window, "full": _draw_full,
         "pin": _draw_pin, "gear": _draw_gear, "close": _draw_close,
-        "list": _draw_list,
+        "list": _draw_list, "help": _draw_help, "info": _draw_info,
+        "copy": _draw_copy, "folder": _draw_folder, "save": _draw_save,
+        "trash": _draw_trash,
     }[kind]
     return QIcon(_make_pixmap(size, fn, color))
 
@@ -723,7 +899,7 @@ class SelectionOverlay(QWidget):
             p.setPen(pen)
             p.drawLine(0, self._mouse.y(), self.width(), self._mouse.y())
             p.drawLine(self._mouse.x(), 0, self._mouse.x(), self.height())
-            hint = "드래그로 영역 선택  ·  Esc/우클릭 취소"
+            hint = "드래그해서 영역을 고르세요  ·  Esc 또는 우클릭으로 취소"
             self._draw_tag(p, QPoint(self._mouse.x() + 14, self._mouse.y() + 18), hint)
         p.end()
 
@@ -822,7 +998,7 @@ class PinWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setWindowTitle("핀 고정")
         self._apply_size()
-        self.setToolTip("드래그 이동 · 휠 크기조절 · 우클릭 메뉴 · 더블클릭/Esc 닫기")
+        self.setToolTip("드래그로 옮기고, 휠로 크기를 조절해요. 우클릭은 메뉴, 더블클릭이나 Esc는 닫기예요.")
 
     def _logical_size(self) -> QSize:
         return QSize(max(1, round(self._pm.width() / self._dpr * self._scale)),
@@ -870,7 +1046,7 @@ class PinWindow(QWidget):
 
     def contextMenuEvent(self, e):
         m = QMenu(self)
-        act_copy = m.addAction("클립보드로 복사")
+        act_copy = m.addAction("클립보드에 복사")
         act_save = m.addAction("다른 이름으로 저장…")
         act_orig = m.addAction("원본 크기 (100%)")
         m.addSeparator()
@@ -966,7 +1142,7 @@ class PreviewPane(QWidget):
         if self._pm is None:
             p.setPen(QColor("#8A93A3"))
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
-                       "캡처하면 여기에 크게 표시돼")
+                       "아직 캡처가 없어요\n위쪽 버튼이나 단축키로 화면을 찍어 보세요")
             p.end()
             return
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
@@ -1238,7 +1414,7 @@ def create_shortcut(where: str) -> "tuple[bool, str]":
     Desktop/Startup 을 만들 때는 시작 메뉴(Programs) 바로가기도 함께 갱신한다 —
     Windows 는 실행 중인 창을 작업 표시줄에 고정할 때 AppID 가 같은 시작 메뉴 바로가기를 찾아 쓴다."""
     if not IS_WINDOWS:
-        return False, "Windows에서만 지원돼."
+        return False, "Windows에서만 만들 수 있어요."
     try:
         import base64
         import subprocess
@@ -1271,10 +1447,157 @@ def create_shortcut(where: str) -> "tuple[bool, str]":
                 return False, f"바로가기 생성 실패 ({_SHORTCUT_PLACES[place]}): {err}"
             set_shortcut_app_id(_special_folder(place) / "핀캡처.lnk")   # 작업 표시줄 고정용 AppID
             made.append(_SHORTCUT_PLACES[place])
-        note = "" if FROZEN else " (pythonw로 실행돼서 터미널 창 없이 켜져)"
-        return True, f"{' · '.join(made)}에 '핀캡처' 바로가기를 만들었어.{note}"
+        note = "" if FROZEN else " pythonw로 실행해서 터미널 창 없이 켜져요."
+        return True, f"{' · '.join(made)}에 '핀캡처' 바로가기를 만들었어요.{note}"
     except Exception as e:
         return False, f"바로가기 생성 실패: {e}"
+
+
+# ---------------------------------------------------------------------------
+# 빠른 안내 / 정보
+# ---------------------------------------------------------------------------
+_WELCOME_MODES = (
+    ("region", "영역 지정", "화면이 멈추면 드래그로 골라요. Esc나 우클릭으로 취소해요."),
+    ("window", "창 캡처", "지금 쓰는 창을 찍어요. 일부가 가려져 있어도 창 내용이 나와요."),
+    ("full", "전체 화면", "마우스가 있는 모니터 전체를 찍어요."),
+    ("pin", "핀 고정", "고른 영역이 항상 위에 떠 있는 창이 돼요."),
+)
+
+
+def _muted(text: str) -> QLabel:
+    lab = QLabel(text)
+    lab.setWordWrap(True)
+    lab.setStyleSheet(f"color:{TEXT_SUB}; font-weight: 400;")
+    return lab
+
+
+class WelcomeDialog(QDialog):
+    """단축키와 핀 사용법. 첫 실행에 한 번, 그 뒤엔 메뉴에서만 연다."""
+
+    def __init__(self, cfg: dict, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"{APP_NAME} 빠른 안내")
+        self.setWindowIcon(make_app_icon())
+        self.setMinimumWidth(520)
+        _polish_dialog(self)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(22, 18, 22, 16)
+        v.setSpacing(10)
+
+        title = QLabel("핀캡처에 오신 것을 환영해요")
+        title.setStyleSheet("font-size: 18px; font-weight: 700;")
+        v.addWidget(title)
+        v.addWidget(_muted(
+            "화면을 찍어 저장하고, 필요한 부분은 다른 창 위에 핀으로 남겨 둘 수 있어요. "
+            "이 안내는 처음 한 번만 자동으로 열리고, 트레이 메뉴의 빠른 안내에서 언제든 다시 볼 수 있어요."
+        ))
+
+        g = QGroupBox("단축키")
+        gv = QVBoxLayout(g)
+        gv.setSpacing(8)
+        hk = cfg.get("hotkeys") or {}
+        for mode, label, desc in _WELCOME_MODES:
+            line = QLabel(f"{label}    {hotkey_label(hk.get(mode, DEFAULTS['hotkeys'].get(mode, '')))}")
+            line.setStyleSheet("font-weight: 700;")
+            gv.addWidget(line)
+            gv.addWidget(_muted(desc))
+        v.addWidget(g)
+
+        g2 = QGroupBox("핀은 이렇게 써요")
+        gv2 = QVBoxLayout(g2)
+        gv2.addWidget(_muted(
+            "· 드래그로 옮기고, 마우스 휠로 크기를 조절해요.\n"
+            "· 우클릭하면 복사, 다른 이름으로 저장, 원래 크기 메뉴가 나와요.\n"
+            "· 더블클릭이나 Esc로 닫아요.\n"
+            "· 핀 고정으로 찍은 이미지는 기본적으로 파일로 저장하지 않고 클립보드에만 복사해요. "
+            "파일로 남기려면 설정에서 ‘핀 캡처도 파일로 저장해요’를 켜 주세요."
+        ))
+        v.addWidget(g2)
+        v.addWidget(_muted(
+            "창의 ×를 눌러도 트레이에서 단축키는 계속 동작해요. "
+            "끝내려면 트레이 아이콘을 우클릭하고 종료를 눌러 주세요."
+        ))
+
+        btn = QPushButton("시작하기")
+        btn.setObjectName("primary")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(self.accept)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(btn)
+        v.addLayout(row)
+
+
+class AboutDialog(QDialog):
+    """버전, 브랜드, 라이선스 요약, 서드파티 고지, 후원."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(f"{APP_NAME} 정보")
+        self.setWindowIcon(make_app_icon())
+        self.setMinimumWidth(460)
+        _polish_dialog(self)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(22, 18, 22, 16)
+        v.setSpacing(10)
+
+        head = QHBoxLayout()
+        icon = QLabel()
+        icon.setPixmap(make_app_icon(48).pixmap(48, 48))
+        head.addWidget(icon, alignment=Qt.AlignmentFlag.AlignTop)
+        titles = QVBoxLayout()
+        name = QLabel(f"{APP_NAME}  {APP_VERSION}")
+        name.setStyleSheet("font-size: 18px; font-weight: 700;")
+        brand = QLabel(f"{APP_PUBLISHER}  ·  {APP_PUBLISHER_EN}")
+        brand.setStyleSheet("font-size: 13px; font-weight: 600;")
+        titles.addWidget(name)
+        titles.addWidget(brand)
+        titles.addWidget(_muted("화면을 캡처해 저장·복사하고, 필요한 부분은 화면 위에 핀으로 고정하는 Windows 트레이 앱이에요."))
+        head.addLayout(titles, 1)
+        v.addLayout(head)
+
+        lic = QGroupBox("라이선스")
+        lv = QVBoxLayout(lic)
+        lv.addWidget(_muted(
+            "All rights reserved.\n"
+            "누구나 개인적·상업적 목적으로 무료로 사용할 수 있어요.\n"
+            "코드의 재배포·수정·판매는 저작권자의 허락 없이 할 수 없어요."
+        ))
+        notices = QPushButton("서드파티 고지 열기")
+        notices.setCursor(Qt.CursorShape.PointingHandCursor)
+        notices.setToolTip("Qt, pynput 등 설치본에 포함된 오픈소스 고지를 열어요.")
+        notices.clicked.connect(self._open_notices)
+        lv.addWidget(notices, alignment=Qt.AlignmentFlag.AlignLeft)
+        v.addWidget(lic)
+
+        donate = QGroupBox("후원")
+        dv = QVBoxLayout(donate)
+        dv.addWidget(_muted(
+            "핀캡처가 도움이 되었다면, 부담 없이 후원할 수 있어요. "
+            "후원하지 않아도 모든 기능은 그대로 무료예요."
+        ))
+        gift = QPushButton("후원하기")
+        gift.setCursor(Qt.CursorShape.PointingHandCursor)
+        gift.setToolTip("브라우저에서 Ko-fi 페이지를 열어요.")
+        gift.clicked.connect(open_kofi)
+        dv.addWidget(gift, alignment=Qt.AlignmentFlag.AlignLeft)
+        v.addWidget(donate)
+
+        close = QPushButton("닫기")
+        close.clicked.connect(self.accept)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(close)
+        v.addLayout(row)
+
+    def _open_notices(self):
+        path = third_party_notices_path()
+        if not path.is_file():
+            QMessageBox.information(
+                self, "서드파티 고지",
+                "고지 파일을 찾지 못했어요.\n설치 폴더의 THIRD_PARTY_NOTICES.txt를 확인해 주세요.")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
 
 # ---------------------------------------------------------------------------
@@ -1285,88 +1608,138 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"{APP_NAME} 설정")
         self.setWindowIcon(make_app_icon())
-        self.setMinimumWidth(460)
+        self.setMinimumWidth(760)
+        _polish_dialog(self)
         self._cfg = cfg
         v = QVBoxLayout(self)
+        v.setContentsMargins(16, 14, 16, 12)
+        v.setSpacing(8)
 
-        # 저장
+        intro = _muted("저장 위치, 캡처한 뒤의 동작, 전역 단축키를 바꿔요. 확인을 눌러야 저장돼요.")
+        v.addWidget(intro)
+
+        cols = QHBoxLayout()
+        cols.setSpacing(12)
+        left = QVBoxLayout()
+        right = QVBoxLayout()
+
         g1 = QGroupBox("저장")
         f1 = QFormLayout(g1)
+        f1.setHorizontalSpacing(10)
+        f1.setVerticalSpacing(8)
+        f1.addRow(_muted("캡처 파일이 쌓이는 곳이에요. 사진 폴더가 클라우드에 있으면 캡처도 함께 동기화돼요."))
         h = QHBoxLayout()
         self.ed_dir = QLineEdit(cfg["save_dir"])
-        btn_browse = QPushButton("찾아보기…")
+        self.ed_dir.setToolTip("캡처 이미지를 저장할 폴더예요.")
+        btn_browse = QPushButton("찾아보기")
+        btn_browse.setToolTip("저장할 폴더를 골라 주세요.")
         btn_browse.clicked.connect(self._browse)
-        h.addWidget(self.ed_dir); h.addWidget(btn_browse)
+        h.addWidget(self.ed_dir)
+        h.addWidget(btn_browse)
         f1.addRow("저장 폴더", h)
         self.ed_prefix = QLineEdit(cfg["filename_prefix"])
-        f1.addRow("파일 이름 접두어", self.ed_prefix)
-        self.cb_format = QComboBox(); self.cb_format.addItems(["png", "jpg"])
+        self.ed_prefix.setToolTip("파일 이름 앞부분이에요. 뒤에는 날짜와 시각이 붙어요.")
+        f1.addRow("파일 이름", self.ed_prefix)
+        self.cb_format = QComboBox()
+        self.cb_format.addItems(["png", "jpg"])
         self.cb_format.setCurrentText(cfg["file_format"])
+        self.cb_format.setToolTip("png는 그대로 저장하고, jpg는 용량이 더 작아요.")
         f1.addRow("파일 형식", self.cb_format)
-        self.sp_quality = QSpinBox(); self.sp_quality.setRange(50, 100)
+        self.sp_quality = QSpinBox()
+        self.sp_quality.setRange(50, 100)
         self.sp_quality.setValue(int(cfg["jpg_quality"]))
+        self.sp_quality.setToolTip("jpg로 저장할 때의 화질이에요. png에는 적용되지 않아요.")
         f1.addRow("JPG 품질", self.sp_quality)
-        v.addWidget(g1)
+        left.addWidget(g1)
 
-        # 동작
-        g2 = QGroupBox("캡처 동작")
-        v2 = QVBoxLayout(g2)
-        self.ck_autosave = QCheckBox("캡처하면 자동으로 파일 저장")
-        self.ck_clip = QCheckBox("캡처하면 클립보드에 복사")
-        self.ck_notify = QCheckBox("캡처 후 트레이 알림 표시")
-        self.ck_hide = QCheckBox("캡처하는 동안 핀캡처 창 숨기기")
-        self.ck_pin_all = QCheckBox("모든 캡처를 핀으로도 화면에 고정")
-        self.ck_pin_save = QCheckBox("핀 캡처도 파일로 저장")
-        self.ck_viewer = QCheckBox("캡처 후 핀캡처 창 자동으로 열기 (방금 캡처가 메인에 표시)")
-        for ck, key in [(self.ck_autosave, "autosave"), (self.ck_clip, "clipboard"),
-                        (self.ck_notify, "notify"), (self.ck_hide, "hide_during_capture"),
-                        (self.ck_pin_all, "pin_after_capture"), (self.ck_pin_save, "pin_autosave"),
-                        (self.ck_viewer, "show_viewer_after_capture")]:
-            ck.setChecked(bool(cfg[key]))
-            v2.addWidget(ck)
-        v.addWidget(g2)
-
-        # 바로가기
         g_sc = QGroupBox("바로가기")
-        h_sc = QHBoxLayout(g_sc)
+        sc = QVBoxLayout(g_sc)
+        sc.addWidget(_muted("Windows 바탕화면, 시작 메뉴, 로그인할 때 자동 실행을 등록해요."))
         btn_desktop = QPushButton("바탕화면 아이콘 만들기")
         btn_startup = QPushButton("부팅 시 자동 실행 등록")
+        btn_desktop.setToolTip("바탕화면과 시작 메뉴에 핀캡처 바로가기를 만들어요.")
+        btn_startup.setToolTip("Windows에 로그인할 때 창 없이 트레이로 시작하게 등록해요.")
         btn_desktop.clicked.connect(lambda: self._make_shortcut("Desktop"))
         btn_startup.clicked.connect(lambda: self._make_shortcut("Startup"))
         if not IS_WINDOWS:
             btn_desktop.setEnabled(False)
             btn_startup.setEnabled(False)
-        h_sc.addWidget(btn_desktop)
-        h_sc.addWidget(btn_startup)
-        h_sc.addStretch(1)
-        v.addWidget(g_sc)
+            btn_desktop.setToolTip("Windows에서만 만들 수 있어요.")
+            btn_startup.setToolTip("Windows에서만 만들 수 있어요.")
+        sc.addWidget(btn_desktop)
+        sc.addWidget(btn_startup)
+        left.addWidget(g_sc)
+        left.addStretch(1)
 
-        # 단축키
+        g2 = QGroupBox("캡처할 때")
+        v2 = QVBoxLayout(g2)
+        self.ck_autosave = QCheckBox("캡처하면 파일로 저장해요")
+        self.ck_clip = QCheckBox("캡처하면 클립보드에 복사해요")
+        self.ck_notify = QCheckBox("캡처 후 트레이 알림을 보여 줘요")
+        self.ck_hide = QCheckBox("캡처하는 동안 이 창을 숨겨요")
+        self.ck_pin_all = QCheckBox("모든 캡처를 핀으로도 고정해요")
+        self.ck_pin_save = QCheckBox("핀 캡처도 파일로 저장해요")
+        self.ck_viewer = QCheckBox("캡처 후 이 창을 열어 방금 찍은 이미지를 보여 줘요")
+        tips = {
+            self.ck_autosave: "영역·창·전체 화면 캡처를 저장 폴더에 바로 저장해요.",
+            self.ck_clip: "캡처한 이미지를 클립보드에 넣어, 다른 곳에 바로 붙여 넣을 수 있어요.",
+            self.ck_notify: "캡처가 끝나면 트레이에 짧은 알림을 띄워요.",
+            self.ck_hide: "캡처하는 동안 핀캡처 창이 화면이나 찍힌 이미지에 나오지 않아요.",
+            self.ck_pin_all: "영역·창·전체 화면으로 찍은 이미지도 핀으로 띄워요.",
+            self.ck_pin_save: "핀 고정으로 찍은 이미지도 파일로 남겨요. 끄면 클립보드에만 복사해요.",
+            self.ck_viewer: "캡처가 끝나면 이 창을 열어 방금 찍은 이미지를 크게 보여 줘요.",
+        }
+        for ck, key in [(self.ck_autosave, "autosave"), (self.ck_clip, "clipboard"),
+                        (self.ck_notify, "notify"), (self.ck_hide, "hide_during_capture"),
+                        (self.ck_pin_all, "pin_after_capture"), (self.ck_pin_save, "pin_autosave"),
+                        (self.ck_viewer, "show_viewer_after_capture")]:
+            ck.setChecked(bool(cfg[key]))
+            ck.setToolTip(tips[ck])
+            v2.addWidget(ck)
+        right.addWidget(g2)
+
+        cols.addLayout(left, 1)
+        cols.addLayout(right, 1)
+        v.addLayout(cols)
+
         g3 = QGroupBox("전역 단축키" + ("" if hotkey_ok else "  (현재 사용 불가)"))
-        f3 = QFormLayout(g3)
+        grid = QGridLayout(g3)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(6)
         self.ed_hk = {}
-        labels = {"region": "영역 지정", "window": "창 캡처", "full": "전체 화면", "pin": "핀 캡처"}
-        for mode, label in labels.items():
+        labels = (("region", "영역 지정"), ("window", "창 캡처"),
+                  ("full", "전체 화면"), ("pin", "핀 고정"))
+        for i, (mode, label) in enumerate(labels):
             ed = QLineEdit(cfg["hotkeys"].get(mode, ""))
-            ed.setPlaceholderText("예: <ctrl>+<alt>+a  (비우면 사용 안 함)")
+            ed.setPlaceholderText("비우면 사용 안 함")
+            ed.setToolTip("예: <ctrl>+<alt>+a")
             self.ed_hk[mode] = ed
-            f3.addRow(label, ed)
-        tip = QLabel("형식: <ctrl> <alt> <shift> <cmd> + 키.  예) <ctrl>+<alt>+a, <print_screen>")
-        tip.setStyleSheet(f"color:{TEXT_SUB}; font-size:11px;")
-        f3.addRow("", tip)
-        btn_reset = QPushButton("단축키 기본값 복원")
+            grid.addWidget(QLabel(label), i // 2, (i % 2) * 2)
+            grid.addWidget(ed, i // 2, (i % 2) * 2 + 1)
+        tip = _muted("형식은 <ctrl>+<alt>+a, <print_screen> 이에요. 비우면 그 단축키를 쓰지 않아요. "
+                     "다른 프로그램과 겹치면 여기 조합을 바꿔 주세요.")
+        grid.addWidget(tip, 2, 0, 1, 4)
+        btn_reset = QPushButton("단축키를 기본값으로")
+        btn_reset.setToolTip("영역 Ctrl+Alt+A, 창 Ctrl+Alt+W, 전체 Ctrl+Alt+F, 핀 Ctrl+Alt+Q 로 되돌려요.")
         btn_reset.clicked.connect(self._reset_hotkeys)
-        f3.addRow("", btn_reset)
+        grid.addWidget(btn_reset, 3, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
         v.addWidget(g3)
 
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
                               | QDialogButtonBox.StandardButton.Cancel)
+        ok_btn = bb.button(QDialogButtonBox.StandardButton.Ok)
+        cancel_btn = bb.button(QDialogButtonBox.StandardButton.Cancel)
+        if ok_btn is not None:
+            ok_btn.setText("확인")
+            ok_btn.setObjectName("primary")
+        if cancel_btn is not None:
+            cancel_btn.setText("취소")
         bb.accepted.connect(self._accept)
         bb.rejected.connect(self.reject)
         v.addWidget(bb)
 
     def _browse(self):
-        d = QFileDialog.getExistingDirectory(self, "저장 폴더 선택", self.ed_dir.text())
+        d = QFileDialog.getExistingDirectory(self, "저장할 폴더를 골라 주세요", self.ed_dir.text())
         if d:
             self.ed_dir.setText(d)
 
@@ -1392,7 +1765,7 @@ class SettingsDialog(QDialog):
                         keyboard.HotKey.parse(s)
                     except Exception:
                         QMessageBox.warning(self, "단축키 형식 오류",
-                                            f"'{s}' 는 올바른 형식이 아니야.\n예: <ctrl>+<alt>+a")
+                                            f"'{s}' 는 올바른 형식이 아니에요.\n예: <ctrl>+<alt>+a")
                         return
         except Exception:
             pass
@@ -1422,14 +1795,14 @@ class ToolButton(QToolButton):
         self.setIcon(icon)
         self.setText(text)
         self.setToolTip(tip or text)
-        self.setIconSize(QSize(24, 24))
+        self.setIconSize(QSize(26, 26))
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
-        self.setFixedSize(58, 56)
+        self.setFixedSize(88, 72)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet(f"""
             QToolButton {{
                 border: none; border-radius: 8px; color: {TEXT};
-                font-size: 11px; background: transparent; padding-top: 2px;
+                font-size: 12px; background: transparent; padding: 4px 2px 2px 2px;
             }}
             QToolButton:hover {{ background: #EDF3FE; }}
             QToolButton:pressed {{ background: #DDE9FD; }}
@@ -1441,6 +1814,7 @@ class MainToolbar(QWidget):
 
     def __init__(self, cfg: dict, server: "QLocalServer | None" = None):
         super().__init__(None)
+        apply_ui_font()
         self.cfg = cfg
         self._server = server              # 단일 인스턴스 수신용
         if server is not None:
@@ -1461,12 +1835,12 @@ class MainToolbar(QWidget):
 
         self.setWindowTitle(APP_NAME)
         self.setWindowIcon(make_app_icon())
-        self.setMinimumSize(720, 480)
+        self.setMinimumSize(800, 520)
         size = cfg.get("window_size")
         if isinstance(size, (list, tuple)) and len(size) == 2:
             self.resize(int(size[0]), int(size[1]))
         else:
-            self.resize(1020, 660)
+            self.resize(1080, 700)
 
         self._build_ui()
         if QSystemTrayIcon.isSystemTrayAvailable():
@@ -1505,13 +1879,18 @@ class MainToolbar(QWidget):
     def _build_ui(self):
         self.setObjectName("mainRoot")
         self.setStyleSheet(f"""
-            #mainRoot {{ background: white; }}
+            #mainRoot {{ background: white; color: {TEXT}; }}
             QPushButton {{
-                padding: 6px 14px; border: 1px solid {BORDER}; color: {TEXT};
+                padding: 6px 12px; border: 1px solid {BORDER}; color: {TEXT};
                 border-radius: 6px; background: {BG}; font-size: 12px;
             }}
             QPushButton:hover {{ background: #EDF3FE; }}
             QPushButton:pressed {{ background: #DDE9FD; }}
+            QToolButton#headerBtn {{
+                border: 1px solid {BORDER}; border-radius: 6px; background: {BG};
+                color: {TEXT}; padding: 4px 10px; font-size: 12px;
+            }}
+            QToolButton#headerBtn:hover {{ background: #EDF3FE; }}
             QListWidget {{
                 background: #F2F4F8; border: 1px solid {BORDER}; border-radius: 8px;
                 font-size: 11px; color: {TEXT_SUB};
@@ -1520,12 +1899,37 @@ class MainToolbar(QWidget):
             QListWidget::item:selected {{ background: #D6E4FC; color: {TEXT}; }}
         """)
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 8, 10, 8)
-        root.setSpacing(6)
+        root.setContentsMargins(16, 12, 16, 12)
+        root.setSpacing(8)
 
-        # ── 기능함 (캡처 버튼 줄) ──
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        mark = QLabel()
+        mark.setPixmap(make_app_icon(28).pixmap(28, 28))
+        head.addWidget(mark, alignment=Qt.AlignmentFlag.AlignTop)
+        titles = QVBoxLayout()
+        titles.setSpacing(0)
+        title = QLabel(APP_NAME)
+        title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        subtitle = QLabel("화면을 찍어 보관하고, 필요한 부분은 핀으로 고정해요.")
+        subtitle.setStyleSheet(f"color:{TEXT_SUB}; font-size: 12px;")
+        titles.addWidget(title)
+        titles.addWidget(subtitle)
+        head.addLayout(titles)
+        head.addStretch(1)
+        self.btn_help = self._header_btn("help", "안내", "단축키와 핀 사용법을 다시 봐요.", self.show_welcome)
+        self.btn_about = self._header_btn("info", "정보", "버전, 만든 이, 라이선스, 후원을 봐요.", self.show_about)
+        self.btn_settings = self._header_btn("gear", "설정", "저장 폴더, 동작, 단축키를 바꿔요.", self.open_settings)
+        for b in (self.btn_help, self.btn_about, self.btn_settings):
+            head.addWidget(b, alignment=Qt.AlignmentFlag.AlignTop)
+        root.addLayout(head)
+
+        cap_title = QLabel("캡처")
+        cap_title.setStyleSheet("font-weight: 700;")
+        root.addWidget(cap_title)
+
         cap = QHBoxLayout()
-        cap.setSpacing(2)
+        cap.setSpacing(6)
         self.btn_region = ToolButton(make_icon("region"), "영역 지정")
         self.btn_window = ToolButton(make_icon("window"), "창 캡처")
         self.btn_full = ToolButton(make_icon("full"), "전체 화면")
@@ -1536,15 +1940,12 @@ class MainToolbar(QWidget):
         self.btn_pin.clicked.connect(lambda: self.capture("pin"))
         for b in (self.btn_region, self.btn_window, self.btn_full):
             cap.addWidget(b)
-        sep = QFrame(); sep.setFrameShape(QFrame.Shape.VLine)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
         sep.setStyleSheet(f"color:{BORDER};")
         cap.addWidget(sep)
         cap.addWidget(self.btn_pin)
         cap.addStretch(1)
-        self.btn_settings = self._title_btn("gear", "설정")
-        self.btn_settings.clicked.connect(self.open_settings)
-        cap.addWidget(self.btn_settings,
-                      alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
         root.addLayout(cap)
 
         divider = QFrame()
@@ -1552,13 +1953,26 @@ class MainToolbar(QWidget):
         divider.setStyleSheet(f"color:{BORDER}; background:{BORDER}; max-height:1px;")
         root.addWidget(divider)
 
-        # ── 보관함: 선택 항목 동작 줄 ──
+        hist_title = QLabel("보관함")
+        hist_title.setStyleSheet("font-weight: 700;")
+        root.addWidget(hist_title)
+        hist_hint = QLabel("왼쪽이 지금 보는 캡처, 오른쪽이 이전 캡처예요. 목록에서 빼도 파일은 지워지지 않아요.")
+        hist_hint.setWordWrap(True)
+        hist_hint.setStyleSheet(f"color:{TEXT_SUB}; font-size: 11px;")
+        root.addWidget(hist_hint)
+
         bar = QHBoxLayout()
-        self.b_copy = QPushButton("클립보드 복사")
-        self.b_save = QPushButton("다른 이름으로 저장…")
-        self.b_pin_sel = QPushButton("핀 고정")
-        self.b_folder = QPushButton("저장 폴더 열기")
-        self.b_remove = QPushButton("목록에서 제거")
+        bar.setSpacing(6)
+        self.b_copy = self._action_btn("copy", "클립보드에 복사",
+                                       "선택한 캡처를 클립보드에 복사해요. 여러 개면 파일 묶음으로 복사해요.")
+        self.b_save = self._action_btn("save", "다른 이름으로 저장",
+                                       "선택한 캡처를 다른 곳에 저장해요. 여러 개면 폴더를 하나 골라 한꺼번에 저장해요.")
+        self.b_pin_sel = self._action_btn("pin", "화면에 고정",
+                                          "선택한 캡처를 항상 위에 보이는 핀으로 띄워요.")
+        self.b_folder = self._action_btn("folder", "저장 폴더 열기",
+                                         "캡처가 저장되는 폴더를 열어요.")
+        self.b_remove = self._action_btn("trash", "목록에서 제거",
+                                         "목록에서만 빼요. 저장해 둔 파일은 지우지 않아요.")
         self.b_copy.clicked.connect(self._copy_selected)
         self.b_save.clicked.connect(self._save_selected_as)
         self.b_pin_sel.clicked.connect(self._pin_selected)
@@ -1570,7 +1984,6 @@ class MainToolbar(QWidget):
         bar.addWidget(self.b_remove)
         root.addLayout(bar)
 
-        # ── 보관함: 메인 미리보기 + 우측 기록 리스트 ──
         split = QSplitter(Qt.Orientation.Horizontal)
         self.preview = PreviewPane()
         self.listw = QListWidget()
@@ -1581,13 +1994,11 @@ class MainToolbar(QWidget):
         self.listw.setGridSize(QSize(HistoryEntry.THUMB_W + 28, 170))
         self.listw.setWordWrap(True)
         self.listw.setMinimumWidth(HistoryEntry.THUMB_W + 46)
-        # 다중 선택: Ctrl/Shift+클릭, 드래그 영역 선택, Ctrl+A. 미리보기는 '현재 항목' 기준.
         self.listw.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.listw.setToolTip("클릭: 보기  ·  Ctrl/Shift+클릭 또는 드래그: 여러 개 선택  ·  "
-                              "Ctrl+A: 전체 선택  ·  Ctrl+C: 복사  ·  Delete: 목록에서 제거")
+        self.listw.setToolTip("클릭하면 크게 봐요. Ctrl이나 Shift를 누른 채 클릭하거나 드래그하면 여러 개를 골라요. "
+                              "Ctrl+A는 전체, Ctrl+C는 복사, Delete는 목록에서 제거예요.")
         self.listw.currentRowChanged.connect(self._on_row_changed)
         self.listw.itemSelectionChanged.connect(self._refresh_info)
-        # 단축키 (리스트에 포커스가 있어도 QListWidget 기본 Ctrl+C(텍스트 복사) 대신 이미지/파일 복사가 되게)
         for seq, slot in ((QKeySequence.StandardKey.Copy, self._copy_selected),
                           (QKeySequence(Qt.Key.Key_Delete), self._remove_selected),
                           (QKeySequence.StandardKey.SelectAll, self.listw.selectAll)):
@@ -1602,47 +2013,89 @@ class MainToolbar(QWidget):
         root.addWidget(split, 1)
 
         self.info = QLabel("")
-        self.info.setStyleSheet(f"color:{TEXT_SUB}; font-size:11px;")
+        self.info.setStyleSheet(f"color:{TEXT_SUB}; font-size: 12px;")
         root.addWidget(self.info)
 
-    def _title_btn(self, kind: str, tip: str) -> QToolButton:
+    def _header_btn(self, kind: str, text: str, tip: str, slot) -> QToolButton:
         b = QToolButton()
-        b.setIcon(make_icon(kind, TEXT_SUB, 16))
-        b.setIconSize(QSize(14, 14))
-        b.setFixedSize(22, 22)
+        b.setObjectName("headerBtn")
+        b.setIcon(make_icon(kind, TEXT, 16))
+        b.setIconSize(QSize(16, 16))
+        b.setText(text)
+        b.setToolTip(tip)
+        b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.clicked.connect(slot)
+        return b
+
+    def _action_btn(self, kind: str, text: str, tip: str) -> QPushButton:
+        b = QPushButton(make_icon(kind, TEXT, 16), text)
+        b.setIconSize(QSize(16, 16))
         b.setToolTip(tip)
         b.setCursor(Qt.CursorShape.PointingHandCursor)
-        b.setStyleSheet("""
-            QToolButton { border:none; border-radius:5px; background:transparent; }
-            QToolButton:hover { background:#E8EDF5; }
-        """)
         return b
 
     def _update_tooltips(self):
         hk = self.cfg["hotkeys"]
-        def fmt(c): return f"  ({c})" if c else ""
-        self.btn_region.setToolTip("드래그로 영역을 지정해 캡처" + fmt(hk.get("region")))
-        self.btn_window.setToolTip("현재 활성(전경) 창 캡처" + fmt(hk.get("window")))
-        self.btn_full.setToolTip("마우스가 있는 모니터 전체 캡처" + fmt(hk.get("full")))
-        self.btn_pin.setToolTip("영역을 지정해 화면에 핀 고정" + fmt(hk.get("pin")))
+        tips = (
+            ("region", self.btn_region, "드래그로 영역을 골라 캡처해요. Esc나 우클릭으로 취소해요."),
+            ("window", self.btn_window, "지금 쓰는 창을 캡처해요. 일부가 가려져 있어도 창 내용이 나와요."),
+            ("full", self.btn_full, "마우스가 있는 모니터 전체를 캡처해요."),
+            ("pin", self.btn_pin, "영역을 고르면 그 부분이 항상 위에 떠 있는 핀이 돼요."),
+        )
+        for mode, btn, text in tips:
+            combo = hk.get(mode, "")
+            if combo:
+                btn.setToolTip(f"{text}\n단축키: {hotkey_label(combo)}")
+            else:
+                btn.setToolTip(f"{text}\n단축키: 없음 (설정에서 지정할 수 있어요)")
 
-    def _build_tray(self):
-        self._tray = QSystemTrayIcon(make_app_icon(), self)
-        self._tray.setToolTip(f"{APP_NAME} {APP_VERSION}")
+    def _tray_menu(self) -> QMenu:
+        """트레이 우클릭 메뉴. 캡처, 안내, 후원을 나눠 두었어요."""
         m = QMenu()
-        m.addAction("영역 지정 캡처", lambda: self.capture("region"))
-        m.addAction("창 캡처", lambda: self.capture("window"))
-        m.addAction("전체 화면 캡처", lambda: self.capture("full"))
-        m.addAction("핀 고정 캡처", lambda: self.capture("pin"))
+        self._act_toggle = m.addAction(
+            "창 숨기기" if self.isVisible() else "창 열기", self._toggle_window)
         m.addSeparator()
-        self._act_toggle = m.addAction("창 보이기/숨기기", self._toggle_window)
-        m.addAction("설정…", self.open_settings)
+        m.addAction("영역 지정", lambda: self.capture("region"))
+        m.addAction("창 캡처", lambda: self.capture("window"))
+        m.addAction("전체 화면", lambda: self.capture("full"))
+        m.addAction("핀 고정", lambda: self.capture("pin"))
+        m.addSeparator()
+        m.addAction("빠른 안내", self.show_welcome)
+        m.addAction("설정", self.open_settings)
+        m.addAction("정보", self.show_about)
+        m.addAction("후원하기", open_kofi)
         m.addSeparator()
         m.addAction("다시 시작" if FROZEN else "다시 시작 (업데이트 적용)", self.restart_app)
         m.addAction("종료", self.quit_app)
-        self._tray.setContextMenu(m)
+        m.aboutToShow.connect(self._sync_tray_labels)
+        return m
+
+    def _sync_tray_labels(self):
+        if getattr(self, "_act_toggle", None) is not None:
+            self._act_toggle.setText("창 숨기기" if self.isVisible() else "창 열기")
+
+    def _build_tray(self):
+        self._tray = QSystemTrayIcon(make_app_icon(), self)
+        self._tray.setToolTip(f"{APP_NAME} {APP_VERSION}  ·  {APP_PUBLISHER_EN}")
+        self._tray.setContextMenu(self._tray_menu())
         self._tray.activated.connect(self._on_tray_activated)
         self._tray.show()
+
+    def show_welcome(self):
+        """빠른 안내. 닫으면 welcome_seen 을 저장해서 다음 실행부터는 자동으로 열지 않아요."""
+        if getattr(self, "_welcome_open", False):
+            return
+        self._welcome_open = True
+        try:
+            WelcomeDialog(self.cfg, self).exec()
+        finally:
+            self._welcome_open = False
+            self.cfg["welcome_seen"] = True
+            save_config(self.cfg)
+
+    def show_about(self):
+        AboutDialog(self).exec()
 
     # ---------- 창 동작 ----------
     def closeEvent(self, e):
@@ -1654,7 +2107,7 @@ class MainToolbar(QWidget):
                 self._toast_shown = True
                 self._tray.showMessage(
                     APP_NAME,
-                    "트레이에서 계속 실행 중이야. 단축키도 계속 동작하고, 종료는 트레이 우클릭 → 종료.",
+                    "트레이에서 계속 실행 중이에요. 단축키도 그대로 동작하고, 끝내려면 트레이 아이콘을 우클릭한 뒤 종료를 눌러 주세요.",
                     QSystemTrayIcon.MessageIcon.Information, 3000)
         else:
             self.quit_app()
@@ -1956,10 +2409,10 @@ class MainToolbar(QWidget):
         if not self.cfg["notify"] or self._tray is None:
             return
         if path:
-            self._tray.showMessage("캡처 완료", f"저장됨: {path}",
+            self._tray.showMessage("캡처 완료", f"저장했어요: {path}",
                                    QSystemTrayIcon.MessageIcon.Information, 2200)
         elif self.cfg["clipboard"]:
-            self._tray.showMessage("캡처 완료", "클립보드에 복사됐어.",
+            self._tray.showMessage("캡처 완료", "클립보드에 복사했어요.",
                                    QSystemTrayIcon.MessageIcon.Information, 1800)
 
     # ---------- 보관함 ----------
@@ -2011,7 +2464,7 @@ class MainToolbar(QWidget):
         thumb = e.thumbnail()
         icon = QIcon(thumb) if thumb is not None else make_app_icon()
         item = QListWidgetItem(icon, e.label())
-        item.setToolTip(e.path or "저장 안 된 캡처 (메모리)")
+        item.setToolTip(e.path or "저장하지 않은 캡처 (메모리)")
         item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter)
         return item
 
@@ -2046,14 +2499,14 @@ class MainToolbar(QWidget):
         n = len(rows)
         self.b_remove.setText(f"목록에서 제거 ({n})" if n > 1 else "목록에서 제거")
         if e is None or not rows:
-            self.info.setText("아직 캡처가 없어. 위 버튼이나 단축키로 캡처하면 여기에 쌓여.")
+            self.info.setText("아직 캡처가 없어요. 위쪽 버튼이나 단축키로 화면을 찍어 보세요.")
             return
         if n > 1:
-            self.info.setText(f"{n}개 선택   ·   복사: 파일 묶음으로 복사   ·   저장: 폴더에 일괄 저장"
-                              "   ·   핀 고정: 모두 고정   ·   Delete: 목록에서 제거")
+            self.info.setText(f"{n}개 선택   ·   복사하면 파일 묶음으로 복사하고, 저장하면 폴더에 한꺼번에 저장해요."
+                              "   ·   핀은 모두 고정하고, Delete는 목록에서만 제거해요. 파일은 지우지 않아요.")
             return
         img = getattr(self, "_cur_img", None)
-        where = e.path if e.path else "저장 안 된 캡처 (메모리에만 있음)"
+        where = e.path if e.path else "저장하지 않은 캡처 (메모리에만 있어요)"
         if img is None:
             self.info.setText(f"(이미지를 읽을 수 없음)   ·   {where}")
         else:
@@ -2098,7 +2551,7 @@ class MainToolbar(QWidget):
             md.setImageData(first_img)
         QApplication.clipboard().setMimeData(md)
         if self._tray is not None and self.cfg["notify"]:
-            self._tray.showMessage("복사 완료", f"{len(urls)}개 파일을 클립보드에 복사했어.",
+            self._tray.showMessage("복사 완료", f"{len(urls)}개를 클립보드에 복사했어요.",
                                    QSystemTrayIcon.MessageIcon.Information, 1800)
 
     def _save_selected_as(self):
@@ -2119,7 +2572,7 @@ class MainToolbar(QWidget):
             return
         # 여러 개: 폴더를 고르면 각각 저장 (파일이 있는 건 그대로 복사, 메모리 캡처는 PNG 로)
         import shutil
-        d = QFileDialog.getExistingDirectory(self, f"{len(entries)}개 캡처를 저장할 폴더 선택", str(Path.home()))
+        d = QFileDialog.getExistingDirectory(self, "저장할 폴더를 골라 주세요", str(Path.home()))
         if not d:
             return
         saved, failed = 0, 0
@@ -2145,7 +2598,7 @@ class MainToolbar(QWidget):
             except Exception as ex:
                 print(f"[save] 일괄 저장 실패 {out}: {ex}")
                 failed += 1
-        msg = f"{saved}개 저장했어.\n{d}" + (f"\n(실패 {failed}개)" if failed else "")
+        msg = f"{saved}개를 저장했어요.\n{d}" + (f"\n(실패 {failed}개)" if failed else "")
         QMessageBox.information(self, "저장", msg)
 
     def _pin_selected(self):
@@ -2197,6 +2650,7 @@ def run_selftest() -> int:
     out = Path("selftest_out")
     out.mkdir(exist_ok=True)
     app = QApplication.instance() or QApplication(sys.argv)
+    apply_ui_font(app)
     cfg = load_config()
     results = []
 
@@ -2230,11 +2684,19 @@ def run_selftest() -> int:
                   HistoryEntry(image=_dummy(640, 400, 130)),
                   HistoryEntry(image=_dummy(500, 700, 200))]
     tb.populate()
-    grab(tb, "main", size=(1020, 660))
+    grab(tb, "main", size=(1080, 720))
 
     # 2) 설정 창
     dlg = SettingsDialog(cfg, hotkey_ok=tb.hotkeys.available)
+    dlg.adjustSize()
     grab(dlg, "settings")
+
+    welcome = WelcomeDialog(cfg)
+    welcome.adjustSize()
+    grab(welcome, "welcome")
+    about = AboutDialog()
+    about.adjustSize()
+    grab(about, "about")
 
     # 3) 핀 창 (그라데이션 더미 이미지)
     img = QImage(420, 260, QImage.Format.Format_RGB32)
@@ -2363,8 +2825,7 @@ def main() -> int:
     if args.quit:
         return _send_quit_to_running()
 
-    cfg = load_config()
-    save_config(cfg)  # 첫 실행 시 기본 설정 파일 생성
+    cfg = prepare_config()  # 첫 실행이면 안내를 띄울 준비를 하고, 없으면 기본 설정 파일을 만든다
 
     # 단일 인스턴스: 이미 실행 중이면 신호만 보내고 이 프로세스는 종료.
     # 기존 인스턴스는 창을 앞으로 띄운다 (개발용 .py 실행이면 파일이 갱신됐을 때 재시작).
@@ -2383,7 +2844,7 @@ def main() -> int:
         sock.flush()
         sock.waitForBytesWritten(300)
         sock.disconnectFromServer()
-        print("이미 실행 중 — 기존 창에 신호를 보냈어.")
+        print("이미 실행 중이에요. 기존 창을 앞으로 가져왔어요.")
         return 0
     QLocalServer.removeServer(SINGLETON_NAME)   # 비정상 종료 잔여물 정리
     server = QLocalServer()
@@ -2406,6 +2867,9 @@ def main() -> int:
         set_window_taskbar_identity(int(toolbar.winId()))
     if not args.tray or toolbar._tray is None:   # 트레이가 없는 환경이면 --tray 여도 창을 띄움
         toolbar.show()
+    if should_auto_welcome(cfg, args.tray, toolbar._tray is not None):
+        # 첫 실행에만. --tray(자동 실행)에서는 띄우지 않아 로그인을 끊지 않는다.
+        QTimer.singleShot(400, toolbar.show_welcome)
 
     for flag, mode in [(args.region, "region"), (args.window, "window"),
                        (args.full, "full"), (args.pin, "pin")]:
