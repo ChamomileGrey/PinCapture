@@ -48,8 +48,9 @@ py -3.13 installer\build.py
 |---|---|
 | `APP_VERSION not found in pincapture.py` | 버전 줄 형식이 바뀌었어요 |
 | `bundle check failed: missing=[...] unexpected=[...]` | `PinCapture.spec`의 `DROP`과 `build.py`의 `MUST_HAVE`/`MUST_NOT`이 어긋났어요 |
-| `smoke test failed` | 빌드된 EXE의 `--selftest`(offscreen)가 실패했어요. `installer\build\smoke`에서 직접 실행해 보세요 |
-| `Inno Setup 6 (ISCC.exe) not found` | Inno Setup 6을 설치해요 |
+| `cannot clean ...\installer\build: a file is in use` | `installer\build\dist`에서 실행한 `PinCapture.exe`가 떠 있거나, 그 폴더를 연 탐색기 창이 있어요. 닫고 다시 빌드해요 |
+| `smoke test failed` | 빌드된 EXE의 `--selftest`(offscreen)가 실패했어요. 연기 시험은 `installer\build\smoke`를 임시 홈으로 쓰고, 그 안의 `config.json`이 `save_dir`을 같은 폴더로 가리켜요. 실제 `~/.pincapture`와 사진 폴더는 건드리지 않아요. 로그를 보려면 `PINCAP_NO_LOG`를 빼고 그 홈에서 EXE를 직접 실행해요. 로그를 남에게 보일 때는 경로의 사용자 이름을 가려요 |
+| `Inno Setup 6 (ISCC.exe) not found` | Inno Setup 6을 설치해요. `.iss`의 한국어 메시지(`Korean.isl`)는 6.3 이상에 있어요 |
 
 ## 4. 깨끗한 Windows에서 수동 시험
 

@@ -8,6 +8,8 @@
 #                     stdout/stderr forced to UTF-8 so the Korean release-note name
 #                     prints on a cp1252 CI console
 #   v0.8.0 2026-10-26 Grok 4.7 — bundle check also requires the Windows OCR extension to be packed
+#   v0.8.0 2026-10-26 Grok 4.7 — if installer/build is locked, say which PinCapture.exe to close;
+#                     smoke test runs in an isolated home (own config.json and save_dir)
 """
 Build PinCapture-Setup-<version>.exe.
 
@@ -26,6 +28,7 @@ Steps
 Requires: Python 3.13 with PySide6, pynput, pyinstaller, pillow; Inno Setup 6.
 """
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -180,11 +183,20 @@ SHA-256: {digest}
 
 
 def smoke_test(exe: Path) -> None:
-    """Run the built EXE headless; --selftest renders every window and exits 0."""
+    """Run the built EXE headless; --selftest renders every window and exits 0.
+
+    `work` is also the home folder, with its own config.json and save_dir. The default save folder
+    comes from the Known Folder API (Pictures), which does not follow USERPROFILE (same as tests/_isolation.py).
+    """
     work = BUILD / "smoke"
     shutil.rmtree(work, ignore_errors=True)
-    work.mkdir(parents=True)
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", PINCAP_NO_LOG="1")
+    (work / ".pincapture").mkdir(parents=True)
+    (work / "captures").mkdir()
+    (work / ".pincapture" / "config.json").write_text(
+        json.dumps({"save_dir": str(work / "captures")}), encoding="utf-8")
+    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", PINCAP_NO_LOG="1",
+               USERPROFILE=str(work), HOME=str(work),
+               PINCAP_RECENT_DIR=str(work / "recent-pins"))
     r = subprocess.run([str(exe), "--selftest"], cwd=work, env=env, timeout=120)
     pngs = sorted(p.name for p in (work / "selftest_out").glob("*.png"))
     print(f"selftest exit={r.returncode} outputs={pngs}")
@@ -199,7 +211,11 @@ def main() -> None:
     ver = app_version()
     print(f"PinCapture {ver}")
     shutil.rmtree(BUILD, ignore_errors=True)
-    BUILD.mkdir(parents=True)
+    if BUILD.exists() and any(BUILD.rglob("*")):
+        sys.exit(
+            f"cannot clean {BUILD}: a file is in use. Close PinCapture.exe started from "
+            f"installer\\build\\dist (and Explorer windows inside that folder), then build again.")
+    BUILD.mkdir(parents=True, exist_ok=True)
     OUT.mkdir(parents=True, exist_ok=True)
 
     step("1/5 icon")

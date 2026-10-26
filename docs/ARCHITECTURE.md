@@ -459,7 +459,7 @@ sequenceDiagram
 | `QLocalServer` (Windows 명명 파이프) | `SINGLETON_NAME` = `pincapture-single-instance-<sha1(도메인\사용자\|홈 폴더) 앞 10자리>-<세션 ID>` (Windows 외: `pincapture-single-instance`) | 사용자·홈·로그온 세션별. `UserAccessOption` 으로 같은 사용자만 연결 | `main()` | 두 번째 실행(`main`, 연결 대기 300 ms), `_send_quit_to_running`(1초) |
 | 이름 있는 뮤텍스 | `APP_MUTEX_NAME` = `PinCaptureRunning` | 세션 (접두어 없음 = `Local\`) | `main()` → `_APP_MUTEX`, 프로세스가 끝날 때까지 보유 | `PinCapture.iss` 의 `IsAppRunning`, `_send_quit_to_running` 의 종료 확인 |
 
-`_singleton_name()` 은 홈 폴더도 해시에 넣는다 — 임시 홈을 쓰는 시험의 `--quit` 이 실제로 켜져 있는 핀캡처를 끄지 않게 하기 위함.
+`_singleton_name()` 은 홈 폴더도 해시에 넣는다 — 임시 홈을 쓰는 시험의 `--quit` 이 실제로 켜져 있는 핀캡처를 끄지 않게 하기 위함. Windows가 아니면 이름은 상수 `pincapture-single-instance`다. 시험의 별도 프로세스는 `tests/_isolation.py`의 `isolated_env`로 홈과 `save_dir`를 함께 격리한다. 사진 폴더는 Known Folder API라 `USERPROFILE`만으로는 바뀌지 않는다. `tests/conftest.py`는 세션이 끝날 때 클립보드를 비운 다음 `os._exit`로 Qt 정적 소멸자를 건너뛴다.
 
 메시지 (`MainToolbar._on_singleton_msg`). 형식: ASCII 바이트 그대로, 줄바꿈·응답 없음. 받는 쪽은 `decode(errors="ignore").strip().lower()`.
 

@@ -1,20 +1,19 @@
 """Tests that need a separate process: quitting, CLI flags, the built-in --selftest."""
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from _isolation import isolated_env
+
 ROOT = Path(__file__).resolve().parent.parent
 APP = ROOT / "pincapture.py"
 
 
 def _env(tmp_path):
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", PINCAP_NO_LOG="1", PYTHONIOENCODING="utf-8",
-               USERPROFILE=str(tmp_path), HOME=str(tmp_path),
-               PINCAP_RECENT_DIR=str(tmp_path / "recent-pins"))
-    return env
+    """Isolated home + isolated save folder (see _isolation.isolated_env)."""
+    return isolated_env(tmp_path)
 
 
 @pytest.mark.parametrize("npins", [1, 3])
@@ -61,6 +60,18 @@ def test_launch_argv_script_mode(pc):
     assert Path(argv[-2]).resolve() == APP.resolve()          # script path, not a temp path
     assert Path(argv[0]).name.lower() in ("pythonw.exe", "python.exe", "python3", "python")
     assert pc.app_dir() == APP.parent.resolve()
+
+
+def test_isolated_home_keeps_saves_out_of_the_real_pictures_folder(tmp_path):
+    """The default save folder is the Windows Pictures known folder, which ignores USERPROFILE."""
+    env = isolated_env(tmp_path)
+    code = "import pincapture as pc; print(pc.load_config()['save_dir'])"
+    r = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True,
+                       encoding="utf-8", env=env, timeout=60)
+    assert r.returncode == 0, r.stderr[-500:]
+    save_dir = Path(r.stdout.strip().splitlines()[-1]).resolve()
+    assert save_dir.is_relative_to(tmp_path.resolve())
+    assert (tmp_path / ".pincapture" / "config.json").is_file()
 
 
 def test_singleton_name_is_per_user(pc):

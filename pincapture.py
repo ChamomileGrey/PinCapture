@@ -300,7 +300,7 @@ def _singleton_name() -> str:
 
 SINGLETON_NAME = _singleton_name()
 
-# 색상 테마 (알캡처 느낌의 밝은 UI + 파란 포인트)
+# 색상 테마 (밝은 UI + 파란 포인트)
 ACCENT = "#2F6BFF"
 ACCENT_DARK = "#1F4FD0"
 BG = "#FAFBFD"

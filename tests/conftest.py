@@ -1,10 +1,14 @@
 """Shared test setup.
 
-Every test runs headless (Qt offscreen) with an isolated home folder, so the developer's real
-~/.pincapture (config, log) and save folder are never touched.
+Every test runs headless (Qt offscreen) with an isolated home folder AND an isolated save folder:
+- USERPROFILE/HOME point to a temp folder, so the real ~/.pincapture (config, log) is never touched;
+- that temp home gets a config.json whose save_dir is also temporary. This matters because the default
+  save folder comes from the Windows Known Folder API (Pictures), which does NOT follow USERPROFILE.
+Separate-process tests do the same through _isolation.isolated_env().
 Run:  py -3.13 -m pytest -q
 """
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -12,7 +16,10 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-_HOME = Path(tempfile.mkdtemp(prefix="pincapture-test-home-"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _isolation import isolated_env, make_isolated_home  # noqa: E402,F401  (re-exported for tests)
+
+_HOME = make_isolated_home(Path(tempfile.mkdtemp(prefix="pincapture-test-home-")))
 
 # Must be set before `import pincapture`: CONFIG_DIR and the log path are computed at import time.
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -77,14 +84,22 @@ _session = None
 
 
 def pytest_sessionfinish(session, exitstatus):
-    """Remember the session so pytest_unconfigure can leave with its final code.
+    """Remember the session, and drop leftover clipboard data while Qt is still alive.
 
     `exitstatus` is the value when this hook starts. The terminal reporter may
     still adjust `session.exitstatus` afterwards, so the hard exit reads that.
+
+    On the offscreen platform a QMimeData left by test_history's multi-copy is
+    destroyed after the interpreter is gone and the process exits 0xC0000005
+    even though every test passed. Clearing here happens before pytest_unconfigure
+    calls os._exit. The real Windows clipboard is unaffected (these tests are offscreen).
     """
     global _session
     _session = session
     del exitstatus
+    app = QApplication.instance()
+    if app is not None:
+        app.clipboard().clear()
 
 
 @pytest.hookimpl(trylast=True)
@@ -98,10 +113,13 @@ def pytest_unconfigure(config):
     Every test has passed, but the process dies — Linux exit 139, and GitHub
     Actions' pwsh wrapper reports the Windows crash as exit code 1.
 
-    os._exit keeps pytest's own code and skips atexit plus those destructors.
+    os._exit keeps pytest's own code and skips atexit plus those destructors,
+    so the temp home is removed here rather than with atexit.
     Do not remove this. Real failures still propagate: the code is session.exitstatus.
+    Clipboard clearing stays in pytest_sessionfinish, while Qt can still do it.
     """
     del config
+    shutil.rmtree(_HOME, ignore_errors=True)
     if _session is None:
         return
     code = int(getattr(_session, "exitstatus", 0))

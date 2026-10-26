@@ -15,7 +15,7 @@
 | `pincapture.py` | 앱 전체(약 2,400줄, 단일 파일). 맨 위 주석에 버전 이력이 있어요 | 루트에서 옮기거나 쪼개지 않기 |
 | `requirements.txt` | 실행 의존성: `PySide6==6.11.2`, `pynput==1.8.2`, `six==1.17.0`, Windows OCR용 PyWinRT 3.2.1(`winrt-*`)과 `typing_extensions==4.15.0` | 버전 고정. winrt는 `sys_platform == "win32"` |
 | `requirements-dev.txt` | 위 항목 + `pyinstaller==6.22.3`, `pyinstaller-hooks-contrib==2026.9`, `pillow==12.3.0`, `pytest>=8` | |
-| `tests/conftest.py` | Qt offscreen, `PINCAP_NO_LOG=1`, 격리된 `USERPROFILE`/`HOME`, 픽스처 `pc`·`toolbar`, `spin(ms)` | `import pincapture`보다 먼저 환경을 설정함 |
+| `tests/conftest.py`, `tests/_isolation.py` | Qt offscreen, `PINCAP_NO_LOG=1`, 격리된 `USERPROFILE`/`HOME`과 임시 `save_dir`, 픽스처 `pc`·`toolbar`, `spin(ms)`. 끝날 때 클립보드를 비운 뒤 `os._exit` | `import pincapture`보다 먼저 환경을 설정함. 사진 폴더는 `USERPROFILE`을 따르지 않아요 |
 | `tests/test_*.py`, `tests/quit_probe.py` | 캡처 차단 감지, 보관함, 별도 프로세스(종료·CLI·selftest) 시험 | |
 | `installer/build.py` | 설치 파일 빌드: 아이콘 → 버전 정보 → PyInstaller → 번들 검사 → selftest → ISCC → SHA-256·배포 안내문 | |
 | `installer/PinCapture.spec` | PyInstaller onedir 설정. 안 쓰는 Qt 플러그인 제외(`DROP`) | |
@@ -43,7 +43,7 @@
 
 | 목적 | 명령 | 결과 |
 |---|---|---|
-| 시험(작업을 끝낼 때마다) | `py -3.13 -m pytest -q` | `47 passed`, 약 10초(2026-10-26, Windows CI 기준) |
+| 시험(작업을 끝낼 때마다) | `py -3.13 -m pytest -q` | `48 passed`, 약 10초(2026-10-26, Windows CI 기준) |
 | 설치 파일 빌드 | `py -3.13 installer\build.py` | `installer\output\PinCapture-Setup-<버전>.exe`, `.sha256.txt`, `_배포안내.txt` |
 | 앱 폴더까지만 빌드 | `py -3.13 installer\build.py --no-setup` | `installer\build\dist\PinCapture\`(Inno Setup 없이도 됨) |
 | 버전 확인 | `py -3.13 pincapture.py --version` | `핀캡처 0.8.0` |
@@ -107,16 +107,22 @@ py -3.13 -c "import sys;b=open(sys.argv[1],'rb').read();print(b[:3]==b'\xef\xbb\
 py -3.13 -c "import sys,pathlib;p=pathlib.Path(sys.argv[1]);p.write_text(p.read_text(encoding='utf-8-sig'),encoding='utf-8-sig',newline='\r\n')" installer\docs\사용법.txt
 ```
 
-## 7. 결정이 필요한 것
+## 7. 정해진 것, 그리고 아직 정하지 않은 것
 
-아래 항목은 **소유자에게 물어보고, 에이전트가 정하지 않아요.** 관련 작업을 할 때 현재 상태를 유지하고 질문을 남기세요.
+아래는 확정이에요. 에이전트가 다른 값으로 바꾸지 않아요.
+
+| 항목 | 확정 값 | 위치 |
+|---|---|---|
+| 앱 코드의 라이선스 | All rights reserved. MIT가 아니에요. 무료로 쓸 수 있지만 재배포·수정·판매는 허락 없이 할 수 없어요 | `LICENSE`, `README.md`, 정보 창 |
+| 게시자 이름 | `ChamomileGrey` (한글 표기는 정보 창의 캐모마일그레이) | `installer/PinCapture.iss`의 `#define AppPublisher`와 `installer/build.py`의 `PUBLISHER`. 둘을 함께 바꿔요 |
+| GitHub 저장소 | `ChamomileGrey/PinCapture` | https://github.com/ChamomileGrey/PinCapture |
+| 후원 | https://ko-fi.com/chamomilegrey | `pincapture.py`의 `KOFI_URL`. 정보 창과 트레이의 후원하기만 이 주소를 열어요 |
+
+아직 정하지 않은 것은 **소유자에게 물어보고, 에이전트가 정하지 않아요.**
 
 | 항목 | 현재 상태 | 영향받는 곳 |
 |---|---|---|
-| 앱 코드의 라이선스 | 없음(`LICENSE` 파일 없음). MIT를 추천해요 | 공개 저장소에 라이선스가 없으면 남이 쓸 권리가 없어요. `README.md`, 고지 문서 |
-| 게시자 이름 | `ChamomileGrey` (0.7.0에서 정함. 한글 표기는 정보 창의 캐모마일그레이) | `installer/PinCapture.iss`의 `#define AppPublisher`와 `installer/build.py`의 `PUBLISHER`(둘을 함께 바꿔요). EXE 속성과 앱 목록에 표시돼요. 다시 바꿀 때는 소유자에게 확인해요 |
 | 코드 서명 | 없음 | SmartScreen 경고가 떠요(안내는 `_배포안내.txt`, `사용법.txt` 4장). Windows 11 스마트 앱 컨트롤이 켜진 PC에서는 설치가 막혀요 |
-| GitHub 소유자·저장소 이름 | 미정 | README 링크, CHANGELOG 비교 링크, 사용자 문의처 |
 | pynput을 Win32 `RegisterHotKey`로 바꿀지 | 미정(`docs/reviews/2026-10-22-release-review.md` 2번) | 단축키 코드, LGPL 고지, spec의 `module_collection_mode`, `build.py`의 `MUST_HAVE`, 관리자 권한 창 위에서의 단축키 동작 |
 
 ## 8. 알려진 환경 잡음
@@ -124,7 +130,7 @@ py -3.13 -c "import sys,pathlib;p=pathlib.Path(sys.argv[1]);p.write_text(p.read_
 | 현상 | 원인 | 대처 |
 |---|---|---|
 | pytest 도중 `Windows fatal exception: access violation`이 한 번 출력되지만 시험은 모두 통과 | 소유자 PC의 Teruten WebCube(`T_Prevent64.dll`, 정부24 ezPDFReader 2.0G와 함께 설치됨)가 실행 중인 프로세스에 주입돼요. faulthandler가 그 예외를 출력해요 | 무시해도 돼요. 실패한 테스트가 있을 때만 조사하세요 |
-| pytest가 `N passed`를 찍은 뒤 프로세스가 죽어요. Linux는 SIGSEGV(139), Windows CI는 종료 코드 1로만 보여요 | `QApplication`이 파이썬 종료 뒤에 돌아가는 Qt 정적 소멸자에서 shiboken을 호출해요. 로그에 예외 문장이 없을 수 있어요 | `tests/conftest.py`가 요약을 찍은 다음 pytest 종료 코드로 `os._exit` 해요. 이 종료를 지우지 마세요. 위의 Teruten 한 줄과는 다른 현상이에요 |
+| pytest가 `N passed`를 찍은 뒤 프로세스가 죽어요. Linux는 SIGSEGV(139), Windows는 `0xC0000005` 또는 CI 종료 코드 1 | 두 가지예요. (1) offscreen 클립보드에 남은 `QMimeData`를 해석기가 끝난 뒤에 지워요. (2) Qt 정적 소멸자가 shiboken을 호출해요. 로그에 예외 문장이 없을 수 있어요 | `pytest_sessionfinish`가 클립보드를 비우고, `pytest_unconfigure`가 그 다음 pytest 종료 코드로 `os._exit` 해요. 둘 다 지우지 마세요. Teruten이 시험 도중에 한 줄 찍는 것과는 다른 현상이에요 |
 | 그 뷰어가 열려 있는 동안 모든 GDI 화면 캡처가 완전한 검정 | 같은 원인 | 앱은 0.6.1부터 감지하고 안내해요. 수동 확인 전에 뷰어를 닫거나 재부팅하세요. 우회 코드는 금지예요(6장 6번) |
 | 단축키 자동 시험이 안 됨 | pynput은 주입된 키 입력(`SendInput` 등)을 무시해요 | 단축키는 사람이 실제 키보드로 확인해요(`docs/RELEASE.md` 수동 시험) |
 | offscreen 스크린샷에 글자가 없음 | `QT_QPA_PLATFORM=offscreen`에는 글꼴이 없어요 | 구조 확인용으로는 충분해요. README 스크린샷은 실제 Windows 플랫폼에서 만들어요(9장) |
@@ -134,7 +140,7 @@ py -3.13 -c "import sys,pathlib;p=pathlib.Path(sys.argv[1]);p.write_text(p.read_
 - `archive/`는 절대 커밋하지 않아요. 옛 버전에 소유자 이메일이 들어 있어요. 그 내용을 추적되는 파일로 옮기지도 않아요.
 - 코드, 주석, 문서, 테스트, 커밋 메시지, 이슈 어디에도 소유자 이메일, Windows 사용자 이름, OneDrive 경로, 실제 이름이 들어간 `C:\Users\...` 경로를 쓰지 않아요. 예시는 `C:\Users\<사용자>`나 `%USERPROFILE%`로 써요.
 - `pincapture.log`에는 Python 실행 파일 경로(사용자 이름 포함)와 인수가 기록돼요. 로그를 문서나 이슈에 붙일 때는 경로를 가리세요.
-- 시험은 항상 격리된 홈에서 실행해요. 새 테스트도 실제 `~/.pincapture`나 실제 저장 폴더를 건드리지 않도록 `pc`·`toolbar` 픽스처나 `tmp_path`를 쓰고, 별도 프로세스에는 `tests/test_process.py`의 `_env(tmp_path)`처럼 환경을 넘겨요. 홈을 격리하면 단일 인스턴스 파이프 이름도 달라져서, 시험이 소유자의 실행 중인 앱에 신호를 보내지 않아요.
+- 시험은 항상 격리된 홈에서 실행해요. 새 테스트도 실제 `~/.pincapture`나 실제 저장 폴더를 건드리지 않도록 `pc`·`toolbar` 픽스처나 `tmp_path`를 쓰고, 별도 프로세스에는 `tests/_isolation.py`의 `isolated_env(home)`을 넘겨요(`test_process._env`가 이걸 써요). 홈만 바꾸면 안 돼요. 기본 저장 폴더는 Windows 알려진 폴더 API(사진)라서 `USERPROFILE`을 따르지 않아요. Windows에서는 단일 인스턴스 파이프 이름에 홈 폴더가 들어가서, 시험이 소유자의 실행 중인 앱에 신호를 보내지 않아요.
 - 커밋 전에 개인정보를 점검해요(`git add` 다음에 실행):
   ```powershell
   git grep --cached -nIE '@(gmail|naver|daum|hanmail)\.|\\OneDrive|C:\\Users\\[A-Za-z]'

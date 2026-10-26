@@ -44,7 +44,7 @@ PC에 Python이 여러 개 있으면(python.org 3.13·3.12, Microsoft Store판, 
 
 - 명령은 항상 `py -3.13`처럼 버전을 지정해요. 설치된 목록은 `py -0p`로 봐요.
 - **자동 재실행**: 소스 실행에서 `import PySide6`가 실패하면 앱이 스스로 다른 Python을 찾아요(`_handle_missing_deps`, `_find_python_with_deps`).
-  1. 후보를 이 순서로 모아요: `py -0p` 목록 → `%ProgramData%\Miniconda3`·`Anaconda3` → `~\miniconda3`·`~\anaconda3` → `%LOCALAPPDATA%\Programs\Python\Python3*`(최신 버전부터). 지금 실행 중인 Python은 빼요.
+  1. 후보를 이 순서로 모아요: `py -0p` 목록 → `%ProgramData%\Miniconda3`·`Anaconda3` → `~\miniconda3`·`~\anaconda3` → `%LOCALAPPDATA%\Programs\Python\Python3*`(폴더 이름의 문자열 역순이라, 섞여 있으면 `Python39`가 `Python313`보다 먼저). 지금 실행 중인 Python은 빼요.
   2. `PySide6`와 `pynput`이 둘 다 있는 Python을 먼저 고르고, 없으면 `PySide6`만 있는 Python을 골라요.
   3. 같은 인수로 다시 실행하고 `PINCAP_REEXEC=1`을 붙여 무한 반복을 막아요. 콘솔 없이 실행됐다면 `pythonw.exe`를 써요.
   4. 하나도 없으면 `"<그 Python>" -m pip install PySide6 pynput` 명령을 메시지 박스로 알려 줘요. 개발 환경에서는 버전이 고정된 `-r requirements.txt` 설치를 권해요.
@@ -55,11 +55,11 @@ PC에 Python이 여러 개 있으면(python.org 3.13·3.12, Microsoft Store판, 
 
 | 경로 | 내용 |
 |---|---|
-| `~/.pincapture/config.json` | 설정. 시작할 때 읽은 직후 다시 저장하고, 설정 창 확인과 창 숨김·종료 때도 저장해요. 키 목록은 `docs/ARCHITECTURE.md` 2절에 있어요 |
+| `~/.pincapture/config.json` | 설정. 시작할 때 읽은 직후 다시 저장하고, 설정 창에서 확인을 누를 때, `×`로 창을 트레이로 숨길 때, 종료·다시 시작할 때도 저장해요(Esc로 숨길 때는 저장하지 않아요). 키 목록은 `docs/ARCHITECTURE.md` 2절에 있어요 |
 | `~/.pincapture/pincapture.log` | 실행 기록. 시작할 때 512 KB를 넘었으면 `pincapture.log.old`로 바꿔요. `PINCAP_NO_LOG=1`이면 기록하지 않아요 |
 | `~/.pincapture/clipboard/` | 여러 캡처를 한꺼번에 복사할 때 만드는 임시 PNG. 다음 다중 복사 때 비우고, 종료해도 남아 있어요 |
 | `~/.pincapture/pincapture.ico` | 소스 실행판 바로가기와 작업 표시줄용 아이콘(처음 한 번만 만들어요). EXE는 EXE에 들어 있는 아이콘을 써요 |
-| 저장 폴더(기본 `사진\PinCapture`) | 캡처 이미지. 사진 폴더가 OneDrive로 옮겨진 PC에서는 그 안이에요 |
+| 저장 폴더(기본 `사진\PinCapture`) | 캡처 이미지. 사진 폴더가 OneDrive로 옮겨진 PC에서는 그 안이에요. 기본값은 Windows Known Folder API의 사진 폴더라서 `USERPROFILE`을 바꿔도 따라가지 않아요. 홈을 격리해 실행할 때는 `config.json`에 `save_dir`도 따로 지정해요(`tests/_isolation.py`) |
 
 손으로 `config.json`을 고칠 때 주의할 점:
 - 앱을 끄고 고쳐요. 실행 중이면 창을 숨기거나 종료할 때 앱이 덮어써요.
@@ -100,6 +100,7 @@ Get-Content "$env:USERPROFILE\.pincapture\pincapture.log" -Tail 60 -Encoding UTF
 | `[singleton]` | 다른 실행에서 신호를 받음, `listen` 실패 |
 | `[taskbar]` | 작업 표시줄 식별 정보·바로가기 AppID 기록 실패 |
 | `[config]`, `[save]` | 설정 읽기·쓰기 실패, 일괄 저장 실패 |
+| `[history]` | 저장 폴더의 기존 캡처 스캔 실패(보관함이 비어 보일 때) |
 | `[quit]`, `[restart]`, `[args]`, `[mutex]` | `--quit` 결과, 재시작 실패, 무시한 인수, 뮤텍스 생성 실패 |
 
 ### 캡처가 검게 나와요
@@ -141,6 +142,6 @@ Windows는 최근 입력을 받지 않은 프로세스가 창을 앞으로 가�
 - 앱은 DPI 인식 모드를 따로 설정하지 않아요. Qt 6 기본값(모니터별 DPI 인식)을 그대로 써요.
 - 화면 캡처는 `grab_screen_raw`가 `screen.grabWindow(0)`으로 **물리 픽셀** 이미지를 받고 DPR을 1로 맞춰요.
 - 영역 선택은 모니터마다 오버레이를 하나씩 띄워요. 그래서 모니터를 가로지르는 선택은 안 돼요. 위젯 좌표(논리)는 `_to_phys`가 `정지 화면 폭 / 위젯 폭` 비율로 물리 픽셀로 바꿔요. 저장되는 이미지와 크기 표시(`W × H px`)는 물리 픽셀 기준이에요.
-- 창 캡처는 `PrintWindow(PW_RENDERFULLCONTENT)`로 찍고, `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`로 그림자 테두리를 잘라내요(물리 좌표). 실패하면 화면 캡처에서 창 영역을 잘라내는데, 이때 모니터 배율을 반영해요.
+- 창 캡처는 `PrintWindow(PW_RENDERFULLCONTENT)`로 찍고, `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)`로 그림자 테두리를 잘라내요(물리 좌표). 실패하면 마우스가 있는 모니터의 화면 캡처에서 창 영역을 잘라내요. 창이 다른 모니터에 있거나 배율이 다른 보조 모니터에 있으면 잘못 잘리거나 모니터 전체가 찍힐 수 있어요(`docs/ROADMAP.md` FIX-05).
 - 핀은 마우스가 있는 모니터의 배율로 나눈 논리 크기로 띄워서, 원래 화면과 같은 크기로 보여요. 배율이 다른 모니터로 옮겨도 크기를 다시 계산하지 않아요.
 - `--selftest`는 200% 배율 좌표 변환을 검사해 `dpi_mapping_ok`나 `dpi_mapping_FAIL`을 출력해요(실패해도 종료 코드는 0이니 출력을 확인해요). 실제 125%·150%·배율이 섞인 다중 모니터는 손으로 시험해요(`docs/RELEASE.md` 4장).
