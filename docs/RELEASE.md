@@ -109,6 +109,7 @@ GitHub → Actions → `build` 실행이 끝나면 아래를 확인해요.
 |---|---|---|
 | `Install dependencies` | 고정 버전 휠을 받지 못함 | pip 로그에서 패키지 이름을 확인해요. 버전은 소유자 승인 없이 바꾸지 않아요 |
 | `Tests` | 러너 환경 차이(offscreen, 키보드 훅, 시간 제한) | 실패한 테스트 이름과 출력을 확인해요. 로컬 `py -3.13 -m pytest -q`와 비교해요 |
+| `Tests` | 로그는 `N passed`인데 단계 종료 코드가 1 | Qt가 파이썬 종료 중에 죽는 경우예요. 예외 문장이 없을 수 있어요. `tests/conftest.py`가 요약 뒤에 pytest 코드로 `os._exit` 해요. 그 코드가 있는데도 실패하면 실패한 테스트 이름을 봐요 |
 | `Tag must match APP_VERSION` | 태그와 `APP_VERSION`이 다름 | 잘못 붙인 태그는 `git push --delete origin vX.Y.Z`와 `git tag -d vX.Y.Z`로 지우고(아직 게시 전일 때만) 다시 붙여요 |
 | `Ensure Inno Setup 6` | `choco install innosetup` 실패, 또는 다른 경로에 설치됨, 또는 `Korean.isl` 없음 | 로그의 `ISCC:` 경로를 확인해요. `build.py`의 `find_iscc()`는 `%ProgramFiles(x86)%\Inno Setup 6` 등 정해진 경로와 `PATH`만 봐요. 종료 코드 3010은 워크플로가 성공으로 바꿔요 |
 | `Build installer` | 번들 검사, 연기 시험, `compiler:Languages\Korean.isl` 없음, BOM이 빠진 `.iss` | 3장 표를 보세요. 한국어 메시지 파일이 없다는 오류면 러너의 Inno Setup 버전을 확인해요 |
@@ -116,4 +117,4 @@ GitHub → Actions → `build` 실행이 끝나면 아래를 확인해요.
 | `Draft release` | 권한 부족(403) | 저장소 Settings → Actions → General → Workflow permissions에서 쓰기 권한을 확인해요(워크플로에는 `contents: write`가 있어요) |
 | 릴리스 첨부 파일 이름 | 한글이 들어간 `_배포안내.txt` 이름이 GitHub에서 바뀔 수 있음 | 본문에 내용을 붙였으면 그 첨부 파일은 지워도 돼요 |
 
-첫 실행이 성공하면 `build.yml` 맨 위의 `Status: ... NOT yet run` 주석과 이 장 첫 문장을 고쳐요.
+첫 실행이 초록색이 되면 이 장 첫 문장의 "첫 실행" 안내를 지나간 기록으로 다듬어요.

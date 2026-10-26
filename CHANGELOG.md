@@ -21,6 +21,9 @@
 - 설치 정보의 게시자 이름과 EXE 회사 이름을 `ChamomileGrey`로 맞췄어요(`installer/PinCapture.iss`, `installer/build.py`).
 - CI 워크플로 `.github/workflows/build.yml` 를 다시 넣었어요. Inno Setup 설치가 재부팅 코드 3010 을 내도 성공으로 보고, `Korean.isl` 이 있는지도 확인해요.
 
+### 수정
+- 시험이 모두 통과한 뒤 PySide6 정적 소멸자에서 프로세스가 죽던 문제를 막았어요. `tests/conftest.py`가 요약을 출력한 다음 pytest 종료 코드로 끝나요. Windows CI는 그 충돌을 종료 코드 1로 보고 시험 실패로 오해했어요.
+
 ## [0.6.1] - 2026-10-26
 
 ### 추가

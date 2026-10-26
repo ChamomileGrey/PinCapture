@@ -23,7 +23,7 @@
 | `installer/docs/사용법.txt` | 최종 사용자 안내. 앱과 함께 설치돼요 | UTF-8 BOM + CRLF |
 | `installer/docs/THIRD_PARTY_NOTICES.txt`, `installer/docs/licenses/` | 오픈소스 고지, 라이선스 전문. `Qt-third-party.txt`는 Qt 6.11.2 `qt_attribution.json`에서 생성한 원문 | UTF-8 BOM + CRLF |
 | `installer/build/`, `installer/output/` | 빌드 산출물 | gitignore |
-| `.github/workflows/build.yml` | CI: 시험 → 빌드 → 아티팩트, 태그면 초안 릴리스 | GitHub에서 아직 한 번도 실행되지 않음 |
+| `.github/workflows/build.yml` | CI: 시험 → 빌드 → 아티팩트, 태그면 초안 릴리스 | 0.7.0에서 복구. 시험은 통과인데 단계만 실패하면 `tests/conftest.py`의 종료 처리를 먼저 봐요 |
 | `.gitignore`, `.gitattributes` | `.gitattributes`가 `.iss`와 `installer/docs/*.txt`의 CRLF를 지켜요 | |
 | `README.md`, `CHANGELOG.md`, `GROK.md` | 소개, 변경 기록, Grok용 요약 | |
 | `docs/` | 개발 문서(10장 참고). `docs/images/screenshot-*.png`는 README용 | |
@@ -43,7 +43,7 @@
 
 | 목적 | 명령 | 결과 |
 |---|---|---|
-| 시험(작업을 끝낼 때마다) | `py -3.13 -m pytest -q` | `19 passed`, 약 10초(2026-10-26 기준) |
+| 시험(작업을 끝낼 때마다) | `py -3.13 -m pytest -q` | `29 passed`, 약 10초(2026-10-26, Windows CI 기준) |
 | 설치 파일 빌드 | `py -3.13 installer\build.py` | `installer\output\PinCapture-Setup-<버전>.exe`, `.sha256.txt`, `_배포안내.txt` |
 | 앱 폴더까지만 빌드 | `py -3.13 installer\build.py --no-setup` | `installer\build\dist\PinCapture\`(Inno Setup 없이도 됨) |
 | 버전 확인 | `py -3.13 pincapture.py --version` | `핀캡처 0.7.0` |
@@ -124,6 +124,7 @@ py -3.13 -c "import sys,pathlib;p=pathlib.Path(sys.argv[1]);p.write_text(p.read_
 | 현상 | 원인 | 대처 |
 |---|---|---|
 | pytest 도중 `Windows fatal exception: access violation`이 한 번 출력되지만 시험은 모두 통과 | 소유자 PC의 Teruten WebCube(`T_Prevent64.dll`, 정부24 ezPDFReader 2.0G와 함께 설치됨)가 실행 중인 프로세스에 주입돼요. faulthandler가 그 예외를 출력해요 | 무시해도 돼요. 실패한 테스트가 있을 때만 조사하세요 |
+| pytest가 `N passed`를 찍은 뒤 프로세스가 죽어요. Linux는 SIGSEGV(139), Windows CI는 종료 코드 1로만 보여요 | `QApplication`이 파이썬 종료 뒤에 돌아가는 Qt 정적 소멸자에서 shiboken을 호출해요. 로그에 예외 문장이 없을 수 있어요 | `tests/conftest.py`가 요약을 찍은 다음 pytest 종료 코드로 `os._exit` 해요. 이 종료를 지우지 마세요. 위의 Teruten 한 줄과는 다른 현상이에요 |
 | 그 뷰어가 열려 있는 동안 모든 GDI 화면 캡처가 완전한 검정 | 같은 원인 | 앱은 0.6.1부터 감지하고 안내해요. 수동 확인 전에 뷰어를 닫거나 재부팅하세요. 우회 코드는 금지예요(6장 6번) |
 | 단축키 자동 시험이 안 됨 | pynput은 주입된 키 입력(`SendInput` 등)을 무시해요 | 단축키는 사람이 실제 키보드로 확인해요(`docs/RELEASE.md` 수동 시험) |
 | offscreen 스크린샷에 글자가 없음 | `QT_QPA_PLATFORM=offscreen`에는 글꼴이 없어요 | 구조 확인용으로는 충분해요. README 스크린샷은 실제 Windows 플랫폼에서 만들어요(9장) |
