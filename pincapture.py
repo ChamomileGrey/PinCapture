@@ -21,6 +21,8 @@
 #                      '화면 캡처 방지' 등) 검은 화면을 모니터에 띄우거나 저장하지 않고 원인·해결법 안내
 #   v0.7.0 2026-10-26  Grok (Grok 4.7) — 메인·설정 창 문구와 배치를 다듬고, 첫 실행 빠른 안내·정보 창·
 #                      트레이 메뉴를 정리. 정보 창과 트레이에 후원하기(Ko-fi). 설정 파일 형식은 그대로
+#   v0.8.0 2026-10-26  Grok (Grok 4.7) — 핀 우클릭 글자 복사(Windows OCR), 투명도·클릭 통과,
+#                      최근 핀 다시 열기, 거의 검은 캡처는 핀 대신 보안 프로그램 안내
 #   Created: 2026-08-04 by Claude via claude.ai / Modified: 2026-10-26 by Grok 4.7 via Cursor
 #   빌드: installer/build.py  (PyInstaller onedir + Inno Setup → PinCapture-Setup-<버전>.exe)
 """
@@ -31,6 +33,8 @@
   · 창 캡처 (현재 활성 창, Windows에서 PrintWindow 사용)
   · 전체 화면 캡처 (마우스가 있는 모니터)
   · 핀 고정 (캡처한 이미지를 항상 위 창으로 화면에 고정)
+  · 핀 우클릭: 글자 복사(Windows OCR), 투명도, 클릭 통과
+  · 닫은 핀 다시 열기 (전역 단축키·트레이)
   · 전역 단축키, 트레이 상주, 자동 저장 + 클립보드 복사
 
 실행:  PinCapture.exe  (개발: python pincapture.py)
@@ -47,13 +51,14 @@ import os
 import json
 import argparse
 import datetime
+import tempfile
 from pathlib import Path
 
 IS_WINDOWS = sys.platform == "win32"
 _NO_WINDOW = 0x08000000 if IS_WINDOWS else 0   # subprocess.CREATE_NO_WINDOW
 
 APP_NAME = "핀캡처"
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.8.0"
 APP_PUBLISHER = "캐모마일그레이"                 # 정보 창에 보이는 이름
 APP_PUBLISHER_EN = "ChamomileGrey"             # 설치 정보·EXE 속성과 같은 영문 이름
 KOFI_URL = "https://ko-fi.com/chamomilegrey"   # 후원하기. 이 주소만 연다
@@ -333,11 +338,23 @@ DEFAULTS = {
         "window": "<ctrl>+<alt>+w",
         "full":   "<ctrl>+<alt>+f",
         "pin":    "<ctrl>+<alt>+q",
+        "reopen_pin": "<ctrl>+<alt>+r",    # 최근 핀 다시 열기
+        "clickthrough": "<ctrl>+<alt>+x",  # 클릭 통과 해제 (핀은 클릭을 받지 못함)
     },
+    "recent_pin_limit": 10,            # 닫은 핀을 다시 열 수 있게 보관하는 개수
     "toolbar_pos": None,               # 창 위치 [x, y]
     "window_size": None,               # 창 크기 [w, h]
     "welcome_seen": False,             # 첫 실행 빠른 안내를 닫았는지. 0.6.x 파일에는 없음
 }
+
+
+def _clamp_recent_limit(value, default: int = 10) -> int:
+    """닫은 핀 보관 개수. 잘못된 값은 기본값, 범위는 1~50."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(50, n))
 
 
 def load_config() -> dict:
@@ -354,6 +371,7 @@ def load_config() -> dict:
         print(f"[config] 읽기 실패, 기본값 사용: {e}")
     if not cfg["save_dir"]:
         cfg["save_dir"] = _default_save_dir()
+    cfg["recent_pin_limit"] = _clamp_recent_limit(cfg.get("recent_pin_limit", DEFAULTS["recent_pin_limit"]))
     return cfg
 
 
@@ -683,12 +701,42 @@ def is_pure_black(img) -> bool:
     return im == black
 
 
+# 보안 모듈(예: Teruten)은 픽셀이 한두 개만 검정이 아닐 때도 있다. 표본의 이 비율 이상이
+# 거의 검정(채널당 0~16)이면 캡처가 막힌 것으로 본다.
+MOSTLY_BLACK_RATIO = 0.985
+_NEAR_BLACK_MAX = 16
+
+
+def is_mostly_black(img, ratio: float = MOSTLY_BLACK_RATIO) -> bool:
+    """이미지가 거의 전부 검정인지. 완전한 #000000 은 is_pure_black.
+    큰 이미지는 격자에서 최대 약 64×64 점을 뽑아 비교한다 (전체 스캔은 하지 않음)."""
+    if img is None:
+        return False
+    if isinstance(img, QPixmap):
+        img = img.toImage()
+    if img.isNull() or img.width() <= 0 or img.height() <= 0:
+        return False
+    im = img.convertToFormat(QImage.Format.Format_RGB32)
+    w, h = im.width(), im.height()
+    step_x = max(1, w // 64)
+    step_y = max(1, h // 64)
+    total = dark = 0
+    for y in range(0, h, step_y):
+        for x in range(0, w, step_x):
+            c = im.pixel(x, y)
+            total += 1
+            if ((c & 0xFF) <= _NEAR_BLACK_MAX and ((c >> 8) & 0xFF) <= _NEAR_BLACK_MAX
+                    and ((c >> 16) & 0xFF) <= _NEAR_BLACK_MAX):
+                dark += 1
+    return total > 0 and (dark / total) >= ratio
+
+
 def screens_capture_blocked(grabs: "list | None" = None) -> bool:
-    """모든 모니터의 캡처가 완전한 검정이면 True = 보안 프로그램 등이 화면 캡처를 막고 있음.
+    """모든 모니터의 캡처가 거의 전부 검정이면 True = 보안 프로그램 등이 화면 캡처를 막고 있음.
     grabs 를 주면 이미 찍은 화면들로 판단 (다시 찍지 않음)."""
     if grabs is None:
         grabs = [grab_screen_raw(s) for s in QGuiApplication.screens()]
-    return bool(grabs) and all(is_pure_black(g) for g in grabs)
+    return bool(grabs) and all(is_mostly_black(g) for g in grabs)
 
 
 def screen_under_cursor():
@@ -927,7 +975,7 @@ class SelectionOverlay(QWidget):
 class RegionCaptureSession(QObject):
     """모든 모니터에 오버레이를 띄우고 첫 선택/취소를 받아 정리."""
     finished = Signal(object, object)   # (QImage | None, QPoint | None)
-    blocked = Signal()                  # 화면 캡처가 차단됨 (모든 모니터가 완전한 검정)
+    blocked = Signal()                  # 화면 캡처가 차단됨 (모든 모니터가 거의 전부 검정)
 
     def __init__(self):
         super().__init__()
@@ -980,8 +1028,415 @@ class RegionCaptureSession(QObject):
 
 
 # ---------------------------------------------------------------------------
-# 핀 창 (항상 위 이미지 고정)
+# 핀 창 (항상 위 이미지 고정) + OCR + 최근 핀
 # ---------------------------------------------------------------------------
+OPACITY_STEPS = (100, 80, 60, 40)   # 핀 메뉴·Ctrl+휠 이 오가는 투명도 (%)
+
+OCR_UNAVAILABLE_MSG = (
+    "Windows OCR을 사용할 수 없어요.\n"
+    "Windows 설정 → 시간 및 언어 → 언어 및 지역에서 한국어 또는 영어를 추가하고, "
+    "그 언어의 '광학 문자 인식'을 설치한 뒤 다시 시도해 주세요."
+)
+OCR_NO_LANGUAGE_MSG = (
+    "글자를 읽을 언어 팩이 없어요.\n"
+    "Windows 설정 → 시간 및 언어 → 언어 및 지역에서 한국어나 영어를 추가하고, "
+    "해당 언어의 '광학 문자 인식'을 설치해 주세요."
+)
+OCR_EMPTY_MSG = "이미지에서 글자를 찾지 못했어요."
+OCR_FAILED_MSG = "글자를 읽지 못했어요. 잠시 뒤 다시 시도해 주세요."
+OCR_COPIED_MSG = "글자를 복사했어요."
+_OCR_LANG_ORDER = ("ko-KR", "ko", "en-US", "en")
+
+
+class OcrResult:
+    """recognize_image 의 결과. message 는 사용자에게 보여줄 한국어 문장."""
+
+    def __init__(self, ok: bool, text: str, message: str):
+        self.ok = ok
+        self.text = text
+        self.message = message
+
+
+def format_hotkey(combo: str) -> str:
+    """pynput 표기 `<ctrl>+<alt>+x` 를 `Ctrl+Alt+X` 로."""
+    names = {"ctrl": "Ctrl", "alt": "Alt", "shift": "Shift", "cmd": "Win"}
+    parts = []
+    for raw in (combo or "").split("+"):
+        key = raw.strip().strip("<>").lower()
+        if not key:
+            continue
+        parts.append(names.get(key, key.upper()))
+    return "+".join(parts)
+
+
+def iter_hotkey_bindings(hotkeys: dict):
+    """(모드, 조합) 을 순서대로. 빈 조합과 이미 쓴 조합(먼저 등록된 모드가 이김)은 건너뜀."""
+    seen = set()
+    for mode, combo in hotkeys.items():
+        combo = (combo or "").strip()
+        if not combo:
+            continue
+        if combo in seen:
+            print(f"[hotkey] '{combo}' 가 이미 쓰여 '{mode}' 는 건너뜀")
+            continue
+        seen.add(combo)
+        yield mode, combo
+
+
+def duplicate_hotkey(hotkeys: dict) -> str:
+    """두 모드가 같은 비어 있지 않은 조합을 쓰면 그 조합을, 없으면 빈 문자열."""
+    seen = set()
+    for _mode, combo in hotkeys.items():
+        combo = (combo or "").strip()
+        if not combo:
+            continue
+        if combo in seen:
+            return combo
+        seen.add(combo)
+    return ""
+
+
+def _import_ocr_modules() -> dict:
+    """Windows.Media.Ocr (PyWinRT). 없거나 Windows 가 아니면 ImportError 등으로 실패한다."""
+    from winrt.windows.globalization import Language
+    from winrt.windows.graphics.imaging import BitmapPixelFormat, SoftwareBitmap
+    from winrt.windows.media.ocr import OcrEngine
+    from winrt.windows.storage.streams import DataWriter
+    return {
+        "Language": Language,
+        "BitmapPixelFormat": BitmapPixelFormat,
+        "SoftwareBitmap": SoftwareBitmap,
+        "OcrEngine": OcrEngine,
+        "DataWriter": DataWriter,
+    }
+
+
+def _pick_ocr_engine(OcrEngine, Language):
+    """한국어를 먼저, 그다음 영어. 둘 다 없으면 사용자 프로필 언어."""
+    for tag in _OCR_LANG_ORDER:
+        try:
+            lang = Language(tag)
+        except Exception:
+            continue
+        try:
+            supported = bool(OcrEngine.is_language_supported(lang))
+        except Exception:
+            supported = False
+        if not supported:
+            continue
+        try:
+            engine = OcrEngine.try_create_from_language(lang)
+        except Exception:
+            engine = None
+        if engine is not None:
+            return engine
+    langs = []
+    for name in ("get_available_recognizer_languages", "try_get_available_languages"):
+        fn = getattr(OcrEngine, name, None)
+        if fn is None:
+            continue
+        try:
+            langs = list(fn() or [])
+        except Exception:
+            langs = []
+        if langs:
+            break
+
+    def tag_of(lang) -> str:
+        return (getattr(lang, "language_tag", "") or "").lower()
+
+    for prefixes in (("ko",), ("en",)):
+        for lang in langs:
+            t = tag_of(lang)
+            if not any(t == p or t.startswith(p + "-") for p in prefixes):
+                continue
+            try:
+                engine = OcrEngine.try_create_from_language(lang)
+            except Exception:
+                engine = None
+            if engine is not None:
+                return engine
+    try:
+        return OcrEngine.try_create_from_user_profile_languages()
+    except Exception:
+        return None
+
+
+def _prepare_ocr_image(image: QImage) -> QImage:
+    """Windows OCR 이 받는 크기(대략 40~2000px)로 맞춘다."""
+    im = image
+    w, h = im.width(), im.height()
+    long_side = max(w, h)
+    if long_side > 2000:
+        scale = 2000 / long_side
+        im = im.scaled(max(1, round(w * scale)), max(1, round(h * scale)),
+                       Qt.AspectRatioMode.KeepAspectRatio,
+                       Qt.TransformationMode.SmoothTransformation)
+        w, h = im.width(), im.height()
+    if w < 40 or h < 40:
+        canvas = QImage(max(w, 40), max(h, 40), QImage.Format.Format_ARGB32)
+        canvas.fill(QColor(255, 255, 255))
+        painter = QPainter(canvas)
+        painter.drawImage(0, 0, im)
+        painter.end()
+        im = canvas
+    return im
+
+
+def _rgba_bytes(image: QImage) -> "tuple[bytes, int, int]":
+    im = image.convertToFormat(QImage.Format.Format_RGBA8888)
+    w, h = im.width(), im.height()
+    bpl = im.bytesPerLine()
+    mv = memoryview(im.constBits())
+    row = w * 4
+    if bpl == row:
+        return bytes(mv[:h * row]), w, h
+    out = bytearray(h * row)
+    for y in range(h):
+        out[y * row:(y + 1) * row] = mv[y * bpl:y * bpl + row]
+    return bytes(out), w, h
+
+
+def _bitmap_from_rgba(data: bytes, w: int, h: int, mods: dict):
+    writer = mods["DataWriter"]()
+    try:
+        writer.write_bytes(data)
+    except TypeError:
+        writer.write_bytes(list(data))
+    buf = writer.detach_buffer()
+    fmt = mods["BitmapPixelFormat"].RGBA8
+    bitmap_cls = mods["SoftwareBitmap"]
+    if hasattr(bitmap_cls, "create_copy_from_buffer"):
+        return bitmap_cls.create_copy_from_buffer(buf, fmt, w, h)
+    bitmap = bitmap_cls(fmt, w, h)
+    bitmap.copy_from_buffer(buf)
+    return bitmap
+
+
+def _await_ocr(operation):
+    if hasattr(operation, "__await__"):
+        import asyncio
+        try:
+            return asyncio.run(operation)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(operation)
+            finally:
+                loop.close()
+    if hasattr(operation, "get"):
+        return operation.get()
+    return operation
+
+
+def recognize_image(image: QImage) -> OcrResult:
+    """핀 이미지에서 글자를 읽는다. 모듈·언어 팩이 없으면 안내 문장을 돌려준다.
+    Windows.Media.Ocr 을 쓰며, 한국어를 영어보다 먼저 고른다. 화면 보호를 우회하지 않는다."""
+    if image is None or (hasattr(image, "isNull") and image.isNull()):
+        return OcrResult(False, "", "이미지가 없어요.")
+    try:
+        mods = _import_ocr_modules()
+    except Exception as e:
+        print(f"[ocr] 모듈을 불러오지 못함: {e}")
+        return OcrResult(False, "", OCR_UNAVAILABLE_MSG)
+    try:
+        engine = _pick_ocr_engine(mods["OcrEngine"], mods["Language"])
+    except Exception as e:
+        print(f"[ocr] 엔진 준비 실패: {e}")
+        return OcrResult(False, "", OCR_NO_LANGUAGE_MSG)
+    if engine is None:
+        return OcrResult(False, "", OCR_NO_LANGUAGE_MSG)
+    try:
+        prepared = _prepare_ocr_image(image)
+        data, w, h = _rgba_bytes(prepared)
+        bitmap = _bitmap_from_rgba(data, w, h, mods)
+        result = _await_ocr(engine.recognize_async(bitmap))
+        text = (getattr(result, "text", "") or "").strip()
+    except Exception as e:
+        print(f"[ocr] 인식 실패: {e}")
+        return OcrResult(False, "", OCR_FAILED_MSG)
+    if not text:
+        return OcrResult(False, "", OCR_EMPTY_MSG)
+    return OcrResult(True, text, OCR_COPIED_MSG)
+
+
+def _set_win32_click_through(hwnd: int, on: bool) -> None:
+    """WS_EX_TRANSPARENT (+ LAYERED when on). 끄면 TRANSPARENT 만 뺀다 (투명도용 LAYERED 는 유지)."""
+    if not IS_WINDOWS or not hwnd:
+        return
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        GWL_EXSTYLE = -20
+        WS_EX_LAYERED = 0x00080000
+        WS_EX_TRANSPARENT = 0x00000020
+        # windll 의 전역 프로토타입은 건드리지 않는다 (다른 호출과 겹치지 않게).
+        get_name = "GetWindowLongPtrW" if hasattr(user32, "GetWindowLongPtrW") else "GetWindowLongW"
+        set_name = "SetWindowLongPtrW" if hasattr(user32, "SetWindowLongPtrW") else "SetWindowLongW"
+        get_long = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_void_p, ctypes.c_int)((get_name, user32))
+        set_long = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_void_p, ctypes.c_int, ctypes.c_ssize_t)((set_name, user32))
+        style = int(get_long(hwnd, GWL_EXSTYLE) or 0)
+        if on:
+            style |= WS_EX_LAYERED | WS_EX_TRANSPARENT
+        else:
+            style &= ~WS_EX_TRANSPARENT
+        set_long(hwnd, GWL_EXSTYLE, style)
+    except Exception as e:
+        print(f"[pin] 클릭 통과 스타일 변경 실패: {e}")
+
+
+class PinToast(QWidget):
+    """핀 옆에 잠깐 떴다 사라지는 안내. 클릭 통과 중인 핀과 따로 떠 있다."""
+
+    def __init__(self, text: str, anchor: "QWidget | None" = None, msec: int = 1800):
+        super().__init__(None)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint
+                            | Qt.WindowType.Tool
+                            | Qt.WindowType.WindowStaysOnTopHint
+                            | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.label = QLabel(text)
+        self.label.setWordWrap(True)
+        self.label.setMaximumWidth(360)
+        self.label.setStyleSheet(
+            "background:#1F2430; color:white; padding:8px 12px; border-radius:8px; font-size:12px;")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(self.label)
+        self.adjustSize()
+        if anchor is not None:
+            g = anchor.frameGeometry()
+            x = g.center().x() - self.width() // 2
+            y = g.top() - self.height() - 8
+            screen = QGuiApplication.screenAt(g.center()) or QGuiApplication.primaryScreen()
+            if screen is not None:
+                bounds = screen.availableGeometry()
+                x = min(max(x, bounds.left() + 4), bounds.right() - self.width() - 4)
+                y = min(max(y, bounds.top() + 4), bounds.bottom() - self.height() - 4)
+            self.move(x, y)
+        self.show()
+        QTimer.singleShot(max(400, int(msec)), self.close)
+
+
+def recent_pin_dir() -> Path:
+    """닫은 핀 PNG 를 두는 임시 폴더. 시험은 PINCAP_RECENT_DIR 로 격리한다."""
+    override = os.environ.get("PINCAP_RECENT_DIR")
+    return Path(override) if override else Path(tempfile.gettempdir()) / "pincapture-recent-pins"
+
+
+class RecentPinStore:
+    """닫은 핀을 최신 순으로 최대 N개. 메모리의 QImage 와 임시 폴더의 PNG 를 함께 둔다."""
+
+    def __init__(self, limit: int = 10, directory: "Path | None" = None):
+        self.directory = Path(directory) if directory is not None else recent_pin_dir()
+        self.limit = _clamp_recent_limit(limit)
+        self.items: list = []
+        self._seq = 0
+        self._load()
+
+    def count(self) -> int:
+        return len(self.items)
+
+    def set_limit(self, limit: int) -> None:
+        self.limit = _clamp_recent_limit(limit)
+        self._trim()
+
+    def remember(self, pin: "PinWindow") -> None:
+        img = getattr(pin, "_img", None)
+        if img is None or img.isNull():
+            return
+        png = meta = None
+        try:
+            self.directory.mkdir(parents=True, exist_ok=True)
+            self._seq += 1
+            stamp = f"{datetime.datetime.now():%Y%m%d_%H%M%S_%f}_{self._seq:04d}"
+            png = self.directory / f"{stamp}.png"
+            meta = self.directory / f"{stamp}.json"
+            if not img.save(str(png), "PNG"):
+                print(f"[recent] PNG 저장 실패: {png}")
+                return
+            info = {
+                "x": int(pin.x()),
+                "y": int(pin.y()),
+                "scale": float(pin._scale),
+                "opacity": int(pin._opacity),
+                "dpr": float(pin._dpr),
+            }
+            meta.write_text(json.dumps(info), encoding="utf-8")
+        except Exception as e:
+            print(f"[recent] 보관 실패: {e}")
+            for path in (png, meta):
+                if path is not None:
+                    try:
+                        path.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+            return
+        self.items.insert(0, {"id": stamp, "png": png, "meta": meta, "image": img.copy(), **info})
+        self._trim()
+
+    def pop_latest(self) -> "dict | None":
+        while self.items:
+            item = self.items.pop(0)
+            img = item.get("image")
+            if img is None or (hasattr(img, "isNull") and img.isNull()):
+                loaded = QImage(str(item.get("png", "")))
+                img = loaded if not loaded.isNull() else None
+            self._unlink(item)
+            if img is not None and not img.isNull():
+                item["image"] = img
+                return item
+        return None
+
+    def _trim(self) -> None:
+        while len(self.items) > self.limit:
+            self._unlink(self.items.pop())
+
+    def _unlink(self, item: dict) -> None:
+        for key in ("png", "meta"):
+            path = item.get(key)
+            if not path:
+                continue
+            try:
+                Path(path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    def _load(self) -> None:
+        try:
+            if not self.directory.is_dir():
+                return
+            metas = sorted(self.directory.glob("*.json"), reverse=True)
+        except Exception as e:
+            print(f"[recent] 목록 읽기 실패: {e}")
+            return
+        for meta in metas:
+            if len(self.items) >= self.limit:
+                self._unlink({"png": meta.with_suffix(".png"), "meta": meta})
+                continue
+            try:
+                info = json.loads(meta.read_text(encoding="utf-8"))
+                png = meta.with_suffix(".png")
+                img = QImage(str(png))
+                if img.isNull():
+                    self._unlink({"png": png, "meta": meta})
+                    continue
+                self.items.append({
+                    "id": meta.stem,
+                    "png": png,
+                    "meta": meta,
+                    "image": img,
+                    "x": int(info.get("x", 0)),
+                    "y": int(info.get("y", 0)),
+                    "scale": float(info.get("scale", 1.0)),
+                    "opacity": int(info.get("opacity", 100)),
+                    "dpr": float(info.get("dpr", 1.0)),
+                })
+            except Exception as e:
+                print(f"[recent] {meta.name} 읽기 실패: {e}")
+
+
 class PinWindow(QWidget):
     closed = Signal(object)
 
@@ -991,14 +1446,26 @@ class PinWindow(QWidget):
         self._pm = QPixmap.fromImage(image)
         self._dpr = max(1.0, dpr)
         self._scale = 1.0
+        self._opacity = 100
+        self._click_through = False
         self._drag = None
+        self._toast = None
+        self.release_hotkey = ""          # 클릭 통과를 끄는 전역 단축키 (표시용)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint
                             | Qt.WindowType.WindowStaysOnTopHint
                             | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setWindowTitle("핀 고정")
         self._apply_size()
-        self.setToolTip("드래그로 옮기고, 휠로 크기를 조절해요. 우클릭은 메뉴, 더블클릭이나 Esc는 닫기예요.")
+        self.setToolTip("드래그로 옮기고, 휠로 크기를 조절해요. Ctrl+휠은 투명도, 우클릭은 메뉴, 더블클릭이나 Esc는 닫기예요.")
+
+    @property
+    def opacity_percent(self) -> int:
+        return self._opacity
+
+    @property
+    def click_through(self) -> bool:
+        return self._click_through
 
     def _logical_size(self) -> QSize:
         return QSize(max(1, round(self._pm.width() / self._dpr * self._scale)),
@@ -1006,6 +1473,105 @@ class PinWindow(QWidget):
 
     def _apply_size(self):
         self.resize(self._logical_size())
+
+    def set_opacity(self, percent: int) -> None:
+        percent = int(percent)
+        if percent not in OPACITY_STEPS:
+            percent = min(OPACITY_STEPS, key=lambda step: abs(step - percent))
+        self._opacity = percent
+        self.setWindowOpacity(percent / 100.0)
+
+    def adjust_opacity_step(self, direction: int) -> None:
+        """direction +1 은 더 불투명(휠 위), -1 은 더 투명."""
+        if self._opacity in OPACITY_STEPS:
+            idx = OPACITY_STEPS.index(self._opacity)
+        else:
+            idx = min(range(len(OPACITY_STEPS)), key=lambda i: abs(OPACITY_STEPS[i] - self._opacity))
+        idx = max(0, min(len(OPACITY_STEPS) - 1, idx - direction))
+        self.set_opacity(OPACITY_STEPS[idx])
+
+    def set_click_through(self, on: bool) -> None:
+        """클릭을 뒤 창으로 통과시킨다. 켜면 이 핀의 메뉴·드래그로는 끌 수 없다."""
+        on = bool(on)
+        if on == self._click_through:
+            return
+        self._click_through = on
+        self.setWindowFlag(Qt.WindowType.WindowTransparentForInput, on)
+        self.setWindowOpacity(self._opacity / 100.0)
+        self.show()
+        _set_win32_click_through(int(self.winId()), on)
+        self.setWindowOpacity(self._opacity / 100.0)
+        if on:
+            hint = format_hotkey(self.release_hotkey) or "단축키"
+            self.show_toast(
+                "클릭 통과를 켰어요. 마우스가 핀 아래 창으로 전달돼요.\n"
+                f"끄려면 트레이의 '클릭 통과 해제' 또는 {hint} 를 눌러 주세요.",
+                msec=4200)
+
+    def show_toast(self, text: str, msec: int = 1800) -> PinToast:
+        if self._toast is not None:
+            try:
+                self._toast.close()
+            except Exception:
+                pass
+        self._toast = PinToast(text, self, msec)
+        return self._toast
+
+    def copy_ocr(self) -> OcrResult:
+        result = recognize_image(self._img)
+        if result.ok and result.text:
+            QApplication.clipboard().setText(result.text)
+        self.show_toast(result.message, 1800 if result.ok else 4200)
+        return result
+
+    def build_menu(self) -> "tuple[QMenu, dict]":
+        m = QMenu(self)
+        acts = {
+            "ocr": m.addAction("글자 복사(OCR)"),
+            "copy": m.addAction("클립보드에 복사"),
+            "save": m.addAction("다른 이름으로 저장…"),
+            "orig": m.addAction("원본 크기 (100%)"),
+        }
+        opacity_menu = m.addMenu("투명도")
+        acts["opacity"] = {}
+        for pct in OPACITY_STEPS:
+            act = opacity_menu.addAction(f"{pct}%")
+            act.setCheckable(True)
+            act.setChecked(pct == self._opacity)
+            acts["opacity"][pct] = act
+        acts["click"] = m.addAction("클릭 통과")
+        acts["click"].setCheckable(True)
+        acts["click"].setChecked(self._click_through)
+        m.addSeparator()
+        acts["close"] = m.addAction("닫기")
+        return m, acts
+
+    def apply_menu_action(self, chosen, acts: dict) -> None:
+        if chosen is None:
+            return
+        if chosen == acts["ocr"]:
+            self.copy_ocr()
+        elif chosen == acts["copy"]:
+            QApplication.clipboard().setImage(self._img)
+        elif chosen == acts["save"]:
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            path, _ = QFileDialog.getSaveFileName(
+                self, "저장", str(Path.home() / f"핀캡처_{ts}.png"),
+                "PNG (*.png);;JPEG (*.jpg)")
+            if path:
+                self._img.save(path)
+        elif chosen == acts["orig"]:
+            self._scale = 1.0
+            self._apply_size()
+        elif chosen in acts["opacity"].values():
+            for pct, act in acts["opacity"].items():
+                if chosen == act:
+                    self.set_opacity(pct)
+                    break
+        elif chosen == acts["click"]:
+            self.set_click_through(acts["click"].isChecked())
+        elif chosen == acts["close"]:
+            self.close()
 
     # --- 이벤트 ---
     def paintEvent(self, e):
@@ -1018,6 +1584,10 @@ class PinWindow(QWidget):
         p.end()
 
     def wheelEvent(self, e):
+        if e.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self.adjust_opacity_step(1 if e.angleDelta().y() > 0 else -1)
+            e.accept()
+            return
         step = 1.1 if e.angleDelta().y() > 0 else 1 / 1.1
         self._scale = min(5.0, max(0.15, self._scale * step))
         self._apply_size()
@@ -1045,27 +1615,9 @@ class PinWindow(QWidget):
         super().closeEvent(e)
 
     def contextMenuEvent(self, e):
-        m = QMenu(self)
-        act_copy = m.addAction("클립보드에 복사")
-        act_save = m.addAction("다른 이름으로 저장…")
-        act_orig = m.addAction("원본 크기 (100%)")
-        m.addSeparator()
-        act_close = m.addAction("닫기")
-        chosen = m.exec(e.globalPos())
-        if chosen == act_copy:
-            QApplication.clipboard().setImage(self._img)
-        elif chosen == act_save:
-            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            path, _ = QFileDialog.getSaveFileName(
-                self, "저장", str(Path.home() / f"핀캡처_{ts}.png"),
-                "PNG (*.png);;JPEG (*.jpg)")
-            if path:
-                self._img.save(path)
-        elif chosen == act_orig:
-            self._scale = 1.0
-            self._apply_size()
-        elif chosen == act_close:
-            self.close()
+        menu, acts = self.build_menu()
+        chosen = menu.exec(e.globalPos())
+        self.apply_menu_action(chosen, acts)
 
 
 # ---------------------------------------------------------------------------
@@ -1162,7 +1714,7 @@ class PreviewPane(QWidget):
 # 전역 단축키 (pynput — 실패해도 앱은 동작)
 # ---------------------------------------------------------------------------
 class HotkeyManager(QObject):
-    triggered = Signal(str)   # "region" | "window" | "full" | "pin"
+    triggered = Signal(str)   # region | window | full | pin | reopen_pin | clickthrough
 
     def __init__(self):
         super().__init__()
@@ -1180,9 +1732,7 @@ class HotkeyManager(QObject):
             print(f"[hotkey] {self.error}")
             return
         mapping = {}
-        for mode, combo in hotkeys.items():
-            if not combo:
-                continue
+        for mode, combo in iter_hotkey_bindings(hotkeys):
             try:
                 keyboard.HotKey.parse(combo)
             except Exception as e:
@@ -1506,9 +2056,10 @@ class WelcomeDialog(QDialog):
         g2 = QGroupBox("핀은 이렇게 써요")
         gv2 = QVBoxLayout(g2)
         gv2.addWidget(_muted(
-            "· 드래그로 옮기고, 마우스 휠로 크기를 조절해요.\n"
-            "· 우클릭하면 복사, 다른 이름으로 저장, 원래 크기 메뉴가 나와요.\n"
-            "· 더블클릭이나 Esc로 닫아요.\n"
+            "· 드래그로 옮기고, 마우스 휠로 크기를 조절해요. Ctrl+휠은 투명도예요.\n"
+            "· 우클릭하면 글자 복사(OCR), 복사, 다른 이름으로 저장, 투명도, 클릭 통과 메뉴가 나와요.\n"
+            "· 클릭 통과를 켜면 핀을 누를 수 없어요. 트레이의 클릭 통과 해제나 단축키로 꺼 주세요.\n"
+            "· 더블클릭이나 Esc로 닫아요. 닫은 핀은 단축키로 다시 열 수 있어요.\n"
             "· 핀 고정으로 찍은 이미지는 기본적으로 파일로 저장하지 않고 클립보드에만 복사해요. "
             "파일로 남기려면 설정에서 ‘핀 캡처도 파일로 저장해요’를 켜 주세요."
         ))
@@ -1696,6 +2247,15 @@ class SettingsDialog(QDialog):
             ck.setChecked(bool(cfg[key]))
             ck.setToolTip(tips[ck])
             v2.addWidget(ck)
+        recent_row = QHBoxLayout()
+        recent_row.addWidget(QLabel("닫은 핀 보관 개수"))
+        self.sp_recent = QSpinBox()
+        self.sp_recent.setRange(1, 50)
+        self.sp_recent.setValue(_clamp_recent_limit(cfg.get("recent_pin_limit", 10)))
+        self.sp_recent.setToolTip("닫은 핀을 다시 열 수 있게 임시로 보관하는 개수예요.")
+        recent_row.addWidget(self.sp_recent)
+        recent_row.addStretch(1)
+        v2.addLayout(recent_row)
         right.addWidget(g2)
 
         cols.addLayout(left, 1)
@@ -1708,7 +2268,8 @@ class SettingsDialog(QDialog):
         grid.setVerticalSpacing(6)
         self.ed_hk = {}
         labels = (("region", "영역 지정"), ("window", "창 캡처"),
-                  ("full", "전체 화면"), ("pin", "핀 고정"))
+                  ("full", "전체 화면"), ("pin", "핀 고정"),
+                  ("reopen_pin", "최근 핀 다시 열기"), ("clickthrough", "클릭 통과 해제"))
         for i, (mode, label) in enumerate(labels):
             ed = QLineEdit(cfg["hotkeys"].get(mode, ""))
             ed.setPlaceholderText("비우면 사용 안 함")
@@ -1718,11 +2279,13 @@ class SettingsDialog(QDialog):
             grid.addWidget(ed, i // 2, (i % 2) * 2 + 1)
         tip = _muted("형식은 <ctrl>+<alt>+a, <print_screen> 이에요. 비우면 그 단축키를 쓰지 않아요. "
                      "다른 프로그램과 겹치면 여기 조합을 바꿔 주세요.")
-        grid.addWidget(tip, 2, 0, 1, 4)
+        grid.addWidget(tip, 3, 0, 1, 4)
         btn_reset = QPushButton("단축키를 기본값으로")
-        btn_reset.setToolTip("영역 Ctrl+Alt+A, 창 Ctrl+Alt+W, 전체 Ctrl+Alt+F, 핀 Ctrl+Alt+Q 로 되돌려요.")
+        btn_reset.setToolTip(
+            "영역 Ctrl+Alt+A, 창 Ctrl+Alt+W, 전체 Ctrl+Alt+F, 핀 Ctrl+Alt+Q, "
+            "최근 핀 Ctrl+Alt+R, 클릭 통과 해제 Ctrl+Alt+X 로 되돌려요.")
         btn_reset.clicked.connect(self._reset_hotkeys)
-        grid.addWidget(btn_reset, 3, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
+        grid.addWidget(btn_reset, 4, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
         v.addWidget(g3)
 
         bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok
@@ -1769,6 +2332,12 @@ class SettingsDialog(QDialog):
                         return
         except Exception:
             pass
+        pending = {mode: ed.text().strip() for mode, ed in self.ed_hk.items()}
+        clash = duplicate_hotkey(pending)
+        if clash:
+            QMessageBox.warning(self, "단축키 겹침",
+                                f"'{clash}' 가 두 기능에 겹쳐요. 서로 다르게 정해 주세요.")
+            return
         c = self._cfg
         c["save_dir"] = self.ed_dir.text().strip() or _default_save_dir()
         c["filename_prefix"] = self.ed_prefix.text().strip() or "캡처"
@@ -1781,6 +2350,7 @@ class SettingsDialog(QDialog):
         c["pin_after_capture"] = self.ck_pin_all.isChecked()
         c["pin_autosave"] = self.ck_pin_save.isChecked()
         c["show_viewer_after_capture"] = self.ck_viewer.isChecked()
+        c["recent_pin_limit"] = self.sp_recent.value()
         for mode, ed in self.ed_hk.items():
             c["hotkeys"][mode] = ed.text().strip()
         self.accept()
@@ -1826,6 +2396,8 @@ class MainToolbar(QWidget):
         self._capturing = False
         self._was_visible = True
         self._pins = []
+        self._recent = RecentPinStore(limit=cfg.get("recent_pin_limit", 10))
+        self._notice_toast = None
         self._session = None
         self._tray = None
         self._toast_shown = False
@@ -2061,6 +2633,9 @@ class MainToolbar(QWidget):
         m.addAction("전체 화면", lambda: self.capture("full"))
         m.addAction("핀 고정", lambda: self.capture("pin"))
         m.addSeparator()
+        self._act_reopen = m.addAction("최근 핀 다시 열기", self.reopen_recent_pin)
+        self._act_release_ct = m.addAction("클릭 통과 해제", self.clear_click_through)
+        m.addSeparator()
         m.addAction("빠른 안내", self.show_welcome)
         m.addAction("설정", self.open_settings)
         m.addAction("정보", self.show_about)
@@ -2230,7 +2805,43 @@ class MainToolbar(QWidget):
 
     # ---------- 캡처 파이프라인 ----------
     def _on_hotkey(self, mode: str):
+        if mode == "reopen_pin":
+            self.reopen_recent_pin()
+            return
+        if mode == "clickthrough":
+            self.clear_click_through()
+            return
         self.capture(mode)
+
+    def _show_notice(self, text: str, title: str = APP_NAME, msec: int = 2200) -> None:
+        self._last_notice = text
+        if self._tray is not None:
+            self._tray.showMessage(title, text, QSystemTrayIcon.MessageIcon.Information, msec)
+            return
+        self._notice_toast = PinToast(text, self if self.isVisible() else None, msec)
+
+    def reopen_recent_pin(self):
+        """가장 최근에 닫은 핀을 다시 띄운다. 없으면 짧은 안내만 한다."""
+        item = self._recent.pop_latest()
+        if item is None:
+            self._show_notice("다시 열 핀이 없어요.")
+            return None
+        return self._make_pin(
+            item["image"], QPoint(int(item["x"]), int(item["y"])),
+            scale=float(item["scale"]), opacity=int(item["opacity"]), dpr=float(item["dpr"]))
+
+    def clear_click_through(self) -> int:
+        """클릭 통과 중인 핀을 모두 끈다. 핀 자체는 클릭을 받지 못하므로 트레이·단축키가 이 일을 한다."""
+        n = 0
+        for pin in list(self._pins):
+            if pin.click_through:
+                pin.set_click_through(False)
+                n += 1
+        if n:
+            self._show_notice("클릭 통과를 껐어요.")
+        else:
+            self._show_notice("클릭 통과 중인 핀이 없어요.")
+        return n
 
     def capture(self, mode: str):
         """mode: region | window | full | pin"""
@@ -2282,7 +2893,7 @@ class MainToolbar(QWidget):
         exclude = self._own_hwnds() if IS_WINDOWS else set()
         fallback = self._last_ext_hwnd if IS_WINDOWS else None
         img = capture_active_window(exclude, fallback)
-        if is_pure_black(img) and screens_capture_blocked():
+        if is_mostly_black(img) and screens_capture_blocked():
             self._finish(None, None, pin=False)
             self._capture_blocked()
             return
@@ -2292,7 +2903,7 @@ class MainToolbar(QWidget):
         s = screen_under_cursor()
         pm = grab_screen_raw(s)
         # 이 모니터가 완전한 검정일 때만 나머지 모니터도 확인 (한 모니터만 검정이면 실제로 검은 화면일 수 있음)
-        if is_pure_black(pm) and screens_capture_blocked():
+        if is_mostly_black(pm) and screens_capture_blocked():
             self._finish(None, None, pin=False)
             self._capture_blocked()
             return
@@ -2301,13 +2912,14 @@ class MainToolbar(QWidget):
     def _capture_blocked(self):
         """화면 캡처가 통째로 검게 나올 때: 검은 화면을 띄우거나 저장하지 않고 이유를 알린다.
         (보안 프로그램의 캡처 방지를 우회하지는 않는다 — 사용자가 직접 해제하도록 안내만)"""
-        print("[capture] 모든 모니터가 완전한 검정으로 캡처됨 — 보안 프로그램의 화면 캡처 방지로 추정")
+        print("[capture] 모든 모니터가 거의 전부 검정으로 캡처됨 — 보안 프로그램의 화면 캡처 방지로 추정")
         # 실제 사례(2026-10-26): 정부24 전자문서 뷰어(ezPDFReader 2.0G)와 함께 설치된 화면 캡처 방지 모듈
         # (Teruten WebCube: TUCtlSystem 서비스 + T_Prevent64.dll)이 실행 중인 거의 모든 프로그램에 주입되어
         # 캡처가 검게 됨. 새로 띄운 프로그램도 수 초 안에 주입되므로 핀캡처 재시작은 도움이 안 된다.
         # → 1순위 해결책은 '문서 뷰어 닫기', 안 되면 재부팅·해당 뷰어 제거. (우회는 하지 않는다)
         title = "화면 캡처가 막혀 있어요"
-        text = ("화면이 전부 검은색으로만 캡처되고 있어요.\n\n"
+        text = ("보안 프로그램 때문에 캡처가 막혔을 수 있어요.\n\n"
+                "화면이 거의 전부 검은색으로만 캡처되고 있어요.\n\n"
                 "정부24·홈택스·은행 같은 사이트의 전자문서 뷰어나 보안 프로그램이 '화면 캡처 방지' 기능을 "
                 "켜 두면 이렇게 됩니다. 이 기능은 실행 중인 다른 프로그램에도 들어가기 때문에 "
                 "다른 캡처 프로그램도 검게 찍힐 수 있어요.\n\n"
@@ -2317,7 +2929,7 @@ class MainToolbar(QWidget):
                 "  3. 계속되면 컴퓨터를 다시 시작하거나, Windows 설정 → 앱에서 그때 설치된\n"
                 "     문서 뷰어(예: ezPDFReader)나 화면 보안 프로그램(예: WebCube)을 제거해 주세요.")
         if self._tray is not None:
-            self._tray.showMessage(title, "보안 프로그램이 화면 캡처를 막고 있는 것 같아요. 안내 창을 확인해 주세요.",
+            self._tray.showMessage(title, "보안 프로그램 때문에 캡처가 막혔을 수 있어요. 안내 창을 확인해 주세요.",
                                    QSystemTrayIcon.MessageIcon.Warning, 4000)
         box = getattr(self, "_blocked_box", None)
         if box is None:
@@ -2393,10 +3005,19 @@ class MainToolbar(QWidget):
             return None
         return str(path)
 
-    def _make_pin(self, img: QImage, gpos):
+    def _make_pin(self, img: QImage, gpos, *, scale: float = 1.0, opacity: int = 100,
+                  dpr: "float | None" = None):
         scr = screen_under_cursor()
-        pin = PinWindow(img, dpr=scr.devicePixelRatio())
-        pin.closed.connect(lambda w: self._pins.remove(w) if w in self._pins else None)
+        if dpr is None:
+            dpr = scr.devicePixelRatio() if scr is not None else 1.0
+        pin = PinWindow(img, dpr=dpr)
+        pin.release_hotkey = self.cfg.get("hotkeys", {}).get("clickthrough", "")
+        if scale != 1.0:
+            pin._scale = float(scale)
+            pin._apply_size()
+        if int(opacity) != 100:
+            pin.set_opacity(int(opacity))
+        pin.closed.connect(self._on_pin_closed)
         self._pins.append(pin)
         if isinstance(gpos, QPoint):
             pin.move(gpos)
@@ -2404,6 +3025,15 @@ class MainToolbar(QWidget):
             g = scr.availableGeometry()
             pin.move(g.center() - QPoint(pin.width() // 2, pin.height() // 2))
         pin.show()
+        return pin
+
+    def _on_pin_closed(self, pin):
+        if pin in self._pins:
+            self._pins.remove(pin)
+        try:
+            self._recent.remember(pin)
+        except Exception as e:
+            print(f"[recent] 보관 실패: {e}")
 
     def _notify(self, path):
         if not self.cfg["notify"] or self._tray is None:
@@ -2639,6 +3269,10 @@ class MainToolbar(QWidget):
         dlg = SettingsDialog(self.cfg, self.hotkeys.available)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             save_config(self.cfg)
+            self._recent.set_limit(self.cfg.get("recent_pin_limit", 10))
+            hint = self.cfg.get("hotkeys", {}).get("clickthrough", "")
+            for pin in self._pins:
+                pin.release_hotkey = hint
             self.hotkeys.restart(self.cfg["hotkeys"])
             self._update_tooltips()
 

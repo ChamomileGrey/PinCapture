@@ -61,5 +61,25 @@ This program uses the following open-source software. Full license texts are in 
    Source  : https://github.com/pyinstaller/pyinstaller
 
 
+
+7. PyWinRT 3.2.1  (Windows OCR)
+   Packages: winrt-runtime, winrt-Windows.Foundation, winrt-Windows.Foundation.Collections,
+             winrt-Windows.Globalization, winrt-Windows.Graphics.Imaging,
+             winrt-Windows.Media.Ocr, winrt-Windows.Storage.Streams  (all 3.2.1)
+   License : MIT  — licenses\PyWinRT-MIT.txt
+   Copyright (c) Microsoft Corporation.
+   Copyright (c) 2021-2025 David Lechner
+   Source  : https://github.com/pywinrt/pywinrt
+
+   Used unmodified, as the official PyPI wheels. Calls the Windows built-in
+   Windows.Media.Ocr API for "글자 복사(OCR)". Installed as separate extension
+   modules under the "_internal" folder, which you may replace.
+
+   typing_extensions 4.15.0 (required by winrt-runtime)
+   License : Python Software Foundation License Version 2  — licenses\Python-PSF.txt
+   Copyright (c) Guido van Rossum, Jukka Lehtosalo, Łukasz Langa, Michael Lee
+   Source  : https://github.com/python/typing_extensions
+
+
 Nothing in the license terms of 핀캡처 restricts modification of the above libraries for your
 own use or reverse engineering for debugging such modifications.

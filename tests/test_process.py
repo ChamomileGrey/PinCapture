@@ -12,7 +12,8 @@ APP = ROOT / "pincapture.py"
 
 def _env(tmp_path):
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen", PINCAP_NO_LOG="1", PYTHONIOENCODING="utf-8",
-               USERPROFILE=str(tmp_path), HOME=str(tmp_path))
+               USERPROFILE=str(tmp_path), HOME=str(tmp_path),
+               PINCAP_RECENT_DIR=str(tmp_path / "recent-pins"))
     return env
 
 

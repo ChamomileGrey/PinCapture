@@ -10,9 +10,36 @@ HERE = SPECPATH                      # installer/
 ROOT = os.path.dirname(HERE)         # project root (pincapture.py)
 BUILD = os.path.join(HERE, "build")
 
+# PyWinRT (MIT) is imported lazily for OCR. Collect the namespace so the EXE can
+# call Windows.Media.Ocr without a system Python. Extension modules stay separate
+# files under _internal (a user can replace them).
+_hidden = [
+    "winrt",
+    "winrt.runtime",
+    "winrt.system",
+    "winrt.windows.foundation",
+    "winrt.windows.foundation.collections",
+    "winrt.windows.globalization",
+    "winrt.windows.graphics.imaging",
+    "winrt.windows.media.ocr",
+    "winrt.windows.storage.streams",
+    "winrt._winrt_windows_media_ocr",
+]
+_binaries = []
+_datas = []
+try:
+    from PyInstaller.utils.hooks import collect_all
+    _datas, _binaries, _more = collect_all("winrt")
+    _hidden.extend(_more)
+except Exception as _exc:
+    print(f"winrt collect_all skipped: {_exc}")
+
 a = Analysis(
     [os.path.join(ROOT, "pincapture.py")],
     pathex=[ROOT],
+    binaries=_binaries,
+    datas=_datas,
+    hiddenimports=_hidden,
     excludes=["tkinter", "unittest", "pydoc", "pdb", "doctest", "lib2to3", "xmlrpc"],
     # LGPL: ship pynput as plain .py files under _internal/pynput so a user can replace it.
     # (PySide6/Qt are already separate DLL/pyd files under _internal/PySide6.)

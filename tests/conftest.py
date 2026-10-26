@@ -19,6 +19,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["PINCAP_NO_LOG"] = "1"
 os.environ["USERPROFILE"] = str(_HOME)      # Path.home() on Windows
 os.environ["HOME"] = str(_HOME)
+os.environ["PINCAP_RECENT_DIR"] = str(_HOME / "recent-pins")
 sys.path.insert(0, str(ROOT))
 
 from PySide6.QtCore import QEventLoop, QTimer        # noqa: E402
@@ -49,6 +50,7 @@ def pc():
 @pytest.fixture
 def toolbar(pc, tmp_path, monkeypatch):
     """A MainToolbar with no hotkeys, no notifications and a temporary save folder."""
+    monkeypatch.setenv("PINCAP_RECENT_DIR", str(tmp_path / "recent-pins"))
     monkeypatch.setattr(pc, "save_config", lambda cfg: None)
     cfg = pc.load_config()
     cfg.update(save_dir=str(tmp_path / "captures"), notify=False, clipboard=False,
