@@ -6,6 +6,14 @@
 
 ## [Unreleased]
 
+### 수정
+- 시험이 실제 사진 폴더와 실행 중인 앱을 건드리지 않도록 `tests/_isolation.py`가 임시 홈과 `save_dir`를 만들어요. 기본 저장 폴더는 Windows 알려진 폴더라 `USERPROFILE`만으로는 격리되지 않아요. `conftest.py`, `test_process.py`, `quit_probe.py`가 써요.
+- offscreen 클립보드에 남은 데이터 때문에 시험이 통과한 뒤 `0xC0000005`로 끝나던 문제를 `pytest_sessionfinish`에서 클립보드를 비우는 방식으로 막아요. Qt 정적 소멸자를 건너뛰는 `os._exit`은 그대로예요.
+- `installer/build.py`가 `installer/build`를 비우지 못하면 실행 중인 `PinCapture.exe`나 탐색기 창을 닫으라고 안내해요. 연기 시험은 임시 홈에서 돌아요.
+
+### 보안
+- `installer/docs/사용법.txt`의 로그 보내기 안내에, 로그 경로에 Windows 사용자 이름이 들어 있다는 주의를 더했어요.
+
 ## [0.8.0] - 2026-10-26
 
 ### 추가

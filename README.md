@@ -149,7 +149,7 @@ Get-FileHash .\PinCapture-Setup-0.8.0.exe -Algorithm SHA256
 | 경로 | 내용 |
 |---|---|
 | `pincapture.py` | 앱 소스 (버전·변경 이력은 맨 위) |
-| `tests/` | pytest 테스트 (Qt offscreen, 실제 `~/.pincapture`는 건드리지 않음) |
+| `tests/` | pytest 테스트 (Qt offscreen, 임시 홈과 임시 저장 폴더를 써서 실제 `~/.pincapture`와 저장 폴더, 실행 중인 핀캡처는 건드리지 않음) |
 | `installer/` | `build.py`, `PinCapture.spec`(PyInstaller onedir), `PinCapture.iss`(Inno Setup), 사용자 문서·라이선스 |
 | `.github/workflows/build.yml` | 테스트 + 설치 파일 빌드, `vX.Y.Z` 태그면 초안(draft) 릴리스 생성 |
 | `docs/` | 개발 문서, 검토·사건 기록, 스크린샷 |
@@ -159,7 +159,7 @@ Get-FileHash .\PinCapture-Setup-0.8.0.exe -Algorithm SHA256
 ## 기여 / 운영
 
 - 저장소를 관리·수정하는 사람과 AI 에이전트가 지켜야 할 규칙(바꾸면 안 되는 값, 빌드·배포 순서, 금지 사항)은 [AGENTS.md](AGENTS.md)에 있습니다.
-- 앞으로 할 일과 아직 정하지 않은 사항은 [ROADMAP.md](ROADMAP.md), 버전별 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 있습니다.
+- 앞으로 할 일은 [docs/ROADMAP.md](docs/ROADMAP.md), 버전별 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 있습니다. 라이선스는 All rights reserved, 저장소는 ChamomileGrey/PinCapture, 후원은 https://ko-fi.com/chamomilegrey 입니다.
 - 변경을 올리기 전에 `py -3.13 -m pytest -q`가 통과하는지 확인해 주세요.
 - 화면 UI 문구는 한국어 해요체로 맞추는 중입니다.
 

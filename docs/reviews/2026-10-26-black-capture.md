@@ -77,7 +77,7 @@ Get-Process TUCTLSystem, TDepend* -ErrorAction SilentlyContinue
 | 핀캡처 0.6.0 이하 | 영역 지정 시 모니터 전체를 검은 정지 화면으로 덮음. 검은 이미지 저장·클립보드 복사·보관함 기록. 원인 안내 없음 |
 | 다른 캡처 프로그램 | Windows 캡처 도구에도 같은 DLL이 주입돼 있었음. GDI로 화면을 읽는 캡처 프로그램은 똑같이 검게 찍힐 수 있음 → 핀캡처만 바꿔서 해결되는 문제가 아님 |
 | 시스템 전체 | 캡처와 무관한 프로그램까지 약 300개 프로세스에 주입됨. 안정성 영향은 확인하지 않음 |
-| 개발 환경 | `pytest` 프로세스에 주입되면 faulthandler가 `Windows fatal exception: access violation`을 한 번 출력함. 테스트 결과(`19 passed`)와는 무관 |
+| 개발 환경 | `pytest` 프로세스에 주입되면 faulthandler가 `Windows fatal exception: access violation`을 한 번 출력할 수 있음. 테스트 결과와는 무관. 이와 별도로, offscreen 클립보드에 남은 `QMimeData` 때문에 통과 뒤 `0xC0000005`로 끝나는 경우는 `tests/conftest.py`가 클립보드를 비우고 `os._exit`로 막음. 그 종료는 WebCube와 무관 |
 
 ## 6. 왜 재시작이 안 통하는가
 
