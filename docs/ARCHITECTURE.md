@@ -2,7 +2,7 @@
 
 새 유지보수 담당자용 `pincapture.py` 지도. 앱 전체가 저장소 루트의 파일 하나(약 2,400줄)에 있다.
 
-- 작성 기준: `APP_VERSION = "0.7.0"` (2026-10-26). 내용이 코드와 다르면 **코드가 맞다**.
+- 작성 기준: `APP_VERSION = "0.8.0"` (2026-10-26). 내용이 코드와 다르면 **코드가 맞다**.
 - 줄 번호는 금방 바뀌므로 쓰지 않음. 함수·클래스 이름으로 찾을 것 (`Ctrl+F` / `grep -n "def 이름"`).
 - 아래 절 순서 = 파일 안의 순서.
 - 관련: 실행·빌드 안내 `docs/DEVELOPMENT.md` (일부 오래됨), 빌드 `installer/build.py`, 설치 스크립트 `installer/PinCapture.iss`, 시험 `tests/`.
@@ -18,9 +18,9 @@
 | 1. 부트스트랩 | `launch_argv`, `app_dir`, `_setup_logging`, `_excepthook`, `_handle_missing_deps`, `_singleton_name` | import 되는 순간 로그·예외 처리 설치, PySide6 없으면 다른 Python 으로 재실행 |
 | 2. 설정 | `DEFAULTS`, `load_config`, `save_config` | `~/.pincapture/config.json` |
 | 3. 아이콘 | `make_icon`, `make_app_icon` | 이미지 파일 없이 `QPainter` 로 그림 |
-| 4. 캡처 백엔드 | `grab_screen_raw`, `is_pure_black`, `screens_capture_blocked`, `capture_active_window` | 화면/창 픽셀 얻기, 캡처 차단 감지 |
+| 4. 캡처 백엔드 | `grab_screen_raw`, `is_pure_black`, `is_mostly_black`, `screens_capture_blocked`, `capture_active_window` | 화면/창 픽셀 얻기, 캡처 차단 감지 |
 | 5. 영역 선택 | `SelectionOverlay`, `RegionCaptureSession` | 모니터마다 정지 화면 오버레이 |
-| 6. 핀 창 | `PinWindow` | 항상 위에 뜨는 이미지 창 |
+| 6. 핀 창 | `PinWindow`, `recognize_image`, `RecentPinStore` | 항상 위 이미지, OCR, 투명도·클릭 통과, 최근 핀 |
 | 7. 보관함 | `HistoryEntry`, `PreviewPane` | 캡처 기록 1건, 큰 미리보기 |
 | 8. 전역 단축키 | `HotkeyManager` | pynput `GlobalHotKeys` 래퍼 |
 | 9. 작업 표시줄 식별 | `set_window_taskbar_identity`, `set_shortcut_app_id`, `force_foreground` | AppUserModelID·재실행 정보, 창 전경 전환 |
@@ -100,7 +100,8 @@ flowchart LR
 | `pin_after_capture` | `False` | `_finish` (모든 캡처를 핀으로도) |
 | `pin_autosave` | `False` | `_finish` (핀 캡처 저장) |
 | `show_viewer_after_capture` | `True` | `_finish` |
-| `hotkeys` | `region`/`window`/`full`/`pin` → `<ctrl>+<alt>+a`/`w`/`f`/`q` | `HotkeyManager.restart`, `_update_tooltips` |
+| `hotkeys` | `region`/`window`/`full`/`pin`/`reopen_pin`/`clickthrough` → `<ctrl>+<alt>+a`/`w`/`f`/`q`/`r`/`x` | `HotkeyManager.restart`, 트레이·핀 안내 |
+| `recent_pin_limit` | `10` (1~50) | `RecentPinStore` |
 | `toolbar_pos` / `window_size` | `None` | `MainToolbar.__init__`, `_save_geometry` |
 | `welcome_seen` | `False` | 첫 실행 빠른 안내. `prepare_config()` 가 0.6.x 파일(키 없음)은 `True` 로 저장해 안내를 다시 띄우지 않음 |
 
@@ -123,7 +124,8 @@ flowchart LR
 |---|---|
 | `grab_screen_raw(screen)` | `screen.grabWindow(0)` 후 DPR 을 1 로 → 물리 픽셀 그대로의 pixmap |
 | `is_pure_black(img)` | `QImage`/`QPixmap` 전체가 `#000000` 인지. RGB32 로 바꾼 뒤 검정으로 채운 이미지와 C++ 비교 (2560x1440 도 수 ms). `None`/빈 이미지는 `False` |
-| `screens_capture_blocked(grabs=None)` | **모든** 모니터 캡처가 순검정이면 `True`. `grabs` 를 주면 다시 찍지 않음. 빈 목록은 `False` |
+| `is_mostly_black(img)` | 표본 픽셀의 98.5% 이상이 채널당 0~16 이면 `True`. 완전한 검정은 `is_pure_black` |
+| `screens_capture_blocked(grabs=None)` | **모든** 모니터 캡처가 거의 전부 검정이면 `True`. `grabs` 를 주면 다시 찍지 않음. 빈 목록은 `False` |
 | `screen_under_cursor()` | 마우스가 있는 모니터 (없으면 주 모니터) |
 
 순검정 판정 근거: 실제 화면은 작업 표시줄·글자·커서 때문에 모든 픽셀이 `#000000` 일 수 없다. 보안 프로그램의 "화면 캡처 방지"(예: Teruten WebCube 의 `T_Prevent64.dll` 주입)가 켜지면 GDI 캡처가 통째로 검게 나온다. 핀캡처는 **감지하고 설명만** 한다 (우회 금지, 20절).
@@ -162,9 +164,11 @@ Windows 가 아니면 `capture_active_window` 는 마우스가 있는 모니터 
 ## 6. 핀 창: `PinWindow`
 
 - `PinWindow(image, dpr)`: 프레임 없는 항상-위 `Tool` 창, `WA_DeleteOnClose`. 논리 크기 = 픽셀 / `dpr` x `_scale`.
-- 드래그 이동, 휠 확대/축소 (x1.1, 0.15~5.0), 더블클릭·`Esc` 닫기.
-- 우클릭 메뉴(`contextMenuEvent`): 클립보드로 복사 / 다른 이름으로 저장(기본 폴더 = 홈) / 원본 크기 / 닫기.
-- `closed(self)` 시그널 → `MainToolbar._pins` 에서 제거.
+- 드래그 이동, 휠 확대/축소 (x1.1, 0.15~5.0), Ctrl+휠은 투명도 단계(100/80/60/40%), 더블클릭·`Esc` 닫기.
+- 우클릭 메뉴(`build_menu` / `contextMenuEvent`): 글자 복사(OCR) / 클립보드로 복사 / 다른 이름으로 저장(기본 폴더 = 홈) / 원본 크기 / 투명도 / 클릭 통과 / 닫기.
+- `set_click_through`: `WindowTransparentForInput` 과 Windows `WS_EX_TRANSPARENT`. 켠 뒤에는 핀으로 끌 수 없고, `MainToolbar.clear_click_through`(트레이·단축키 `clickthrough`)만 끈다.
+- `recognize_image`: PyWinRT `Windows.Media.Ocr`. 가져오기 실패·언어 팩 없음은 안내 문장으로 반환(우회 없음).
+- `closed(self)` → `MainToolbar._on_pin_closed` 가 `_pins` 에서 빼고 `RecentPinStore.remember` (임시 폴더 PNG + 메모리). `reopen_recent_pin` 이 최신 항목을 다시 `_make_pin`.
 
 ---
 
@@ -517,7 +521,7 @@ sequenceDiagram
 | **앱 아이콘** | `make_app_icon`. 소스 실행은 `~/.pincapture/pincapture.ico` 를 한 번만 만들므로 바꾼 뒤 그 파일을 지워야 바로가기·작업 표시줄에 반영. EXE 아이콘은 다시 빌드 |
 | **저장 파일 이름** | `MainToolbar._save_image` (일괄 저장·임시 복사 파일 이름은 `_save_selected_as`, `_copy_selected`) |
 | **보관함 개수** | 시작 시 불러오는 수: `_scan_existing_files` (60). 최대 보관: `_trim_history` (150). 썸네일 폭: `HistoryEntry.THUMB_W` |
-| **캡처 차단 안내** | `MainToolbar._capture_blocked` (안내 창·트레이 알림). 판정 기준은 `is_pure_black`, `screens_capture_blocked` |
+| **캡처 차단 안내** | `MainToolbar._capture_blocked` (안내 창·트레이 알림). 판정 기준은 `is_mostly_black`, `screens_capture_blocked` (`is_pure_black` 은 완전 검정) |
 | **새 명령줄 옵션** | `main()` 의 `argparse`. 다른 인스턴스에 전달해야 하면 새 메시지를 정해 `_on_singleton_msg` 에 처리 추가 (18절 표 갱신). 설치 프로그램이 쓰는 옵션이면 `PinCapture.iss` |
 | **Qt 모듈·이미지 형식 추가** | `PinCapture.spec` 의 `DROP`, `build.py` 의 `MUST_HAVE`/`MUST_NOT`, `THIRD_PARTY_NOTICES.txt` (지금은 PNG·JPG·ICO 만, QtNetwork 는 로컬 소켓에만 사용) |
 

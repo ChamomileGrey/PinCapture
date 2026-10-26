@@ -1,4 +1,4 @@
-# PinCapture installer build — v0.7.0 — one command from source to setup.exe
+# PinCapture installer build — v0.8.0 — one command from source to setup.exe
 # Created: 2026-10-22 by Claude Opus 5.5 via Claude Code
 # Install path: D:/Tools/PinCapture/installer/build.py
 # Changelog:
@@ -7,6 +7,7 @@
 #   v0.7.0 2026-10-26 Grok 4.7 — publisher/company is ChamomileGrey (kept in sync with PinCapture.iss)
 #                     stdout/stderr forced to UTF-8 so the Korean release-note name
 #                     prints on a cp1252 CI console
+#   v0.8.0 2026-10-26 Grok 4.7 — bundle check also requires the Windows OCR extension to be packed
 """
 Build PinCapture-Setup-<version>.exe.
 
@@ -145,8 +146,10 @@ def check_contents(app: Path) -> None:
     missing = [p for p in MUST_HAVE if not (app / p).exists()]
     names = {f.name.lower() for f in app.rglob("*") if f.is_file()}
     present = [n for n in MUST_NOT if n.lower() in names]
-    if missing or present:
-        sys.exit(f"bundle check failed: missing={missing} unexpected={present}")
+    ocr = [p for p in app.rglob("*") if p.is_file() and p.suffix.lower() in {".pyd", ".dll"}
+           and "ocr" in str(p).lower().replace("\\", "/")]
+    if missing or present or not ocr:
+        sys.exit(f"bundle check failed: missing={missing} unexpected={present} ocr={ocr}")
     print("bundle contents ok")
 
 
@@ -170,6 +173,7 @@ SHA-256: {digest}
 설치 후
   · 시작 메뉴의 [핀캡처 사용법]에 단축키와 사용법이 있습니다.
   · 기본 단축키: 영역 Ctrl+Alt+A / 창 Ctrl+Alt+W / 전체 Ctrl+Alt+F / 핀 고정 Ctrl+Alt+Q
+  · 최근 핀 다시 열기 Ctrl+Alt+R / 클릭 통과 해제 Ctrl+Alt+X
   · 업데이트: 새 설치 파일을 실행하면 됩니다. 제거: 시작 메뉴에서 핀캡처 우클릭 → [제거]
   · 핀캡처는 인터넷에 연결하지 않습니다.
 """, encoding="utf-8-sig")

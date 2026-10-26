@@ -14,6 +14,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 os.environ["PINCAP_NO_LOG"] = "1"
 home = tempfile.mkdtemp(prefix="pincapture-quit-home-")
 os.environ["USERPROFILE"] = os.environ["HOME"] = home
+os.environ["PINCAP_RECENT_DIR"] = os.path.join(home, "recent-pins")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.argv = [sys.argv[0]]
 

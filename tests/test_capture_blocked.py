@@ -88,6 +88,57 @@ def test_genuinely_black_window_is_still_captured(pc, toolbar, monkeypatch):
     assert len(toolbar.history) == 1
 
 
+def test_mostly_black_is_not_pure_but_still_blocked(pc):
+    """Capture blockers sometimes leave a few non-black pixels. That still counts as blocked."""
+    img = QImage(80, 80, QImage.Format.Format_RGB32)
+    img.fill(QColor(0, 0, 0))
+    img.setPixelColor(0, 0, QColor(255, 255, 255))
+    assert not pc.is_pure_black(img)
+    assert pc.is_mostly_black(img)
+    near = QImage(64, 64, QImage.Format.Format_RGB32)
+    near.fill(QColor(10, 10, 10))
+    assert not pc.is_pure_black(near)
+    assert pc.is_mostly_black(near)
+    half = QImage(80, 80, QImage.Format.Format_RGB32)
+    half.fill(QColor(0, 0, 0))
+    for x in range(16):
+        for y in range(80):
+            half.setPixelColor(x, y, QColor(255, 255, 255))
+    assert not pc.is_mostly_black(half)
+
+
+def test_mostly_black_screens_show_security_notice_instead_of_pin(pc, toolbar, monkeypatch):
+    def almost(screen):
+        pm = _pixmap(screen, QColor(0, 0, 0))
+        img = pm.toImage()
+        img.setPixelColor(0, 0, QColor(255, 0, 0))
+        return QPixmap.fromImage(img)
+
+    monkeypatch.setattr(pc, "grab_screen_raw", almost)
+    toolbar.capture("pin")
+    spin(500)
+    assert toolbar._pins == []
+    assert len(toolbar.history) == 0
+    box = toolbar._blocked_box
+    assert box is not None and box.isVisible()
+    assert "보안 프로그램 때문에 캡처가 막혔을 수 있어요" in box.text()
+
+
+def test_mostly_black_window_on_a_normal_desktop_is_kept(pc, toolbar, monkeypatch):
+    """A genuinely dark window is saved when the monitors themselves are not blocked."""
+    primary = QGuiApplication.primaryScreen()
+    monkeypatch.setattr(pc, "grab_screen_raw", lambda s: _pixmap(s, QColor(30, 60, 90)))
+    dark = QImage(80, 80, QImage.Format.Format_RGB32)
+    dark.fill(QColor(0, 0, 0))
+    dark.setPixelColor(0, 0, QColor(8, 8, 8))
+    monkeypatch.setattr(pc, "capture_active_window", lambda ex, fb=None: dark)
+    toolbar.capture("window")
+    spin(500)
+    assert len(toolbar.history) == 1
+    box = getattr(toolbar, "_blocked_box", None)
+    assert box is None or not box.isVisible()
+
+
 def test_explanation_points_to_the_viewer_not_a_restart(pc, toolbar, monkeypatch):
     """Restarting PinCapture does not help while the blocker's injector runs (new processes get the hook
     within seconds), so the dialog must not offer it; the first step is closing the protected viewer."""
@@ -97,6 +148,7 @@ def test_explanation_points_to_the_viewer_not_a_restart(pc, toolbar, monkeypatch
     box = toolbar._blocked_box
     assert all("다시 시작" not in b.text() for b in box.buttons())
     assert "전자문서" in box.text() and "닫" in box.text()
+    assert "보안 프로그램 때문에 캡처가 막혔을 수 있어요" in box.text()
     box.button(box.StandardButton.Ok).click()
     spin(50)
     assert called == [] and not box.isVisible()

@@ -6,14 +6,14 @@
 ## 1. 프로젝트 한 줄 요약
 
 핀캡처(PinCapture)는 PySide6로 만든 Windows 10/11 x64용 화면 캡처 트레이 앱이에요. 영역·창·전체 화면 캡처, 화면 위 핀 고정, 보관함, 전역 단축키를 제공해요.
-소스는 `pincapture.py` 한 파일이고, 배포는 PyInstaller onedir + Inno Setup 설치 파일로 해요. 버전은 `pincapture.py`의 `APP_VERSION`(현재 `0.7.0`) 한 곳에서만 관리해요.
+소스는 `pincapture.py` 한 파일이고, 배포는 PyInstaller onedir + Inno Setup 설치 파일로 해요. 버전은 `pincapture.py`의 `APP_VERSION`(현재 `0.8.0`) 한 곳에서만 관리해요.
 
 ## 2. 저장소 지도
 
 | 경로 | 내용 | 주의 |
 |---|---|---|
 | `pincapture.py` | 앱 전체(약 2,400줄, 단일 파일). 맨 위 주석에 버전 이력이 있어요 | 루트에서 옮기거나 쪼개지 않기 |
-| `requirements.txt` | 실행 의존성: `PySide6==6.11.2`, `pynput==1.8.2`, `six==1.17.0` | 버전 고정 |
+| `requirements.txt` | 실행 의존성: `PySide6==6.11.2`, `pynput==1.8.2`, `six==1.17.0`, Windows OCR용 PyWinRT 3.2.1(`winrt-*`)과 `typing_extensions==4.15.0` | 버전 고정. winrt는 `sys_platform == "win32"` |
 | `requirements-dev.txt` | 위 항목 + `pyinstaller==6.22.3`, `pyinstaller-hooks-contrib==2026.9`, `pillow==12.3.0`, `pytest>=8` | |
 | `tests/conftest.py` | Qt offscreen, `PINCAP_NO_LOG=1`, 격리된 `USERPROFILE`/`HOME`, 픽스처 `pc`·`toolbar`, `spin(ms)` | `import pincapture`보다 먼저 환경을 설정함 |
 | `tests/test_*.py`, `tests/quit_probe.py` | 캡처 차단 감지, 보관함, 별도 프로세스(종료·CLI·selftest) 시험 | |
@@ -43,10 +43,10 @@
 
 | 목적 | 명령 | 결과 |
 |---|---|---|
-| 시험(작업을 끝낼 때마다) | `py -3.13 -m pytest -q` | `29 passed`, 약 10초(2026-10-26, Windows CI 기준) |
+| 시험(작업을 끝낼 때마다) | `py -3.13 -m pytest -q` | `47 passed`, 약 10초(2026-10-26, Windows CI 기준) |
 | 설치 파일 빌드 | `py -3.13 installer\build.py` | `installer\output\PinCapture-Setup-<버전>.exe`, `.sha256.txt`, `_배포안내.txt` |
 | 앱 폴더까지만 빌드 | `py -3.13 installer\build.py --no-setup` | `installer\build\dist\PinCapture\`(Inno Setup 없이도 됨) |
-| 버전 확인 | `py -3.13 pincapture.py --version` | `핀캡처 0.7.0` |
+| 버전 확인 | `py -3.13 pincapture.py --version` | `핀캡처 0.8.0` |
 | 소스로 실행(소유자 확인 후) | `py -3.13 pincapture.py`, 콘솔 없이 실행하려면 `pyw -3.13 pincapture.py` | 창과 트레이 아이콘 |
 
 명령줄 옵션은 아래와 같아요. 모르는 인수는 무시해요(`parse_known_args`).

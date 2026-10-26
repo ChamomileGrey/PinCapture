@@ -3,3 +3,14 @@
 PySide6==6.11.2
 pynput==1.8.2
 six==1.17.0
+
+# Windows.Media.Ocr via PyWinRT 3.2.1 (MIT). Windows-only wheels; other platforms skip them.
+# https://github.com/pywinrt/pywinrt
+winrt-runtime==3.2.1; sys_platform == "win32"
+winrt-Windows.Foundation==3.2.1; sys_platform == "win32"
+winrt-Windows.Foundation.Collections==3.2.1; sys_platform == "win32"
+winrt-Windows.Globalization==3.2.1; sys_platform == "win32"
+winrt-Windows.Graphics.Imaging==3.2.1; sys_platform == "win32"
+winrt-Windows.Media.Ocr==3.2.1; sys_platform == "win32"
+winrt-Windows.Storage.Streams==3.2.1; sys_platform == "win32"
+typing_extensions==4.15.0; sys_platform == "win32"
