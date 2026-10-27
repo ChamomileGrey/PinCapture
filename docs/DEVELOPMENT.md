@@ -38,6 +38,8 @@ pyw -3.13 pincapture.py         # 콘솔 없이. 오류는 로그와 메시지 �
 
 수동 시험용 환경 변수 `PINCAP_TEST_RESTART`, `PINCAP_TEST_AUTOEXIT`는 `docs/ARCHITECTURE.md` 19절에 있어요.
 
+수식(LaTeX)은 선택입니다. 사용자는 글자 복사의 **수식**에서 **설치**를 누를 때만 zip을 받아요. Python이나 pip는 필요 없어요. `requirements-math.txt`를 `requirements.txt`나 설치 파일에 넣지 않아요. `installer/PinCapture.spec`이 `onnxruntime`, `tokenizers`, `yaml`, `numpy`를 빼고, `build.py`의 묶음 검사가 경로에 `onnxruntime`, `tokenizers`, `pp_formulanet`, `pix2tex`가 있으면 빌드를 멈춰요. 릴리스에 붙는 zip은 `py -3.13 installer/build_math_pack.py`가 만들고, `pincapture.py`의 `MATH_PACK_SHA256`·`MATH_PACK_BYTES`와 같아야 해요. `--check`가 다르면 끝나요. 태그 빌드가 이 zip을 초안 릴리스에 넣어요. 초안은 공개 주소로 받을 수 없으니, 설치 버튼이 동작하려면 릴리스를 게시해야 해요.
+
 ## 2. Python 선택 함정
 
 PC에 Python이 여러 개 있으면(python.org 3.13·3.12, Microsoft Store판, Miniconda 등) `python`이나 `py`가 가리키는 Python이 설치·업데이트 뒤에 바뀔 수 있어요. 그러면 PySide6가 없는 Python으로 실행돼요.

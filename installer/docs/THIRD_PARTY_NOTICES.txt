@@ -81,5 +81,52 @@ This program uses the following open-source software. Full license texts are in 
    Source  : https://github.com/python/typing_extensions
 
 
+8. Optional formula-to-LaTeX pack  (NOT included in the installer)
+   수식 mode can turn a captured formula into LaTeX. The base installer does not ship
+   the model or the runtime. Text and table copy work without them.
+   The app downloads PinCapture-Math-<version>.zip only after the user clicks 설치,
+   checks its SHA-256, and checks the model and tokenizer hashes inside the zip.
+   Cancelling leaves a partial file so the next 설치 can resume. 설정 can remove the files.
+
+   The zip is a GitHub release asset built by installer/build_math_pack.py.
+   It contains PP-FormulaNet_plus-S (about 233 MB) plus the Windows runtime below.
+
+   PP-FormulaNet_plus-S  (PaddlePaddle)
+   License : Apache License 2.0  — licenses\Apache-2.0.txt
+   Copyright (c) PaddlePaddle Authors. All rights reserved.
+   Source  : https://huggingface.co/PaddlePaddle/PP-FormulaNet_plus-S
+   The ONNX file this guide names (pp_formulanet_plus_s.onnx) is the Apache-2.0
+   conversion published with RapidAI RapidDoc:
+   https://www.modelscope.cn/models/RapidAI/RapidDoc
+   PinCapture does not bundle RapidDoc or PaddleX. The image preprocess lives in pincapture.py.
+
+   pix2tex / LaTeX-OCR weights are NOT used. Those weights are CC BY-NC-SA and are not
+   a permissive license. Do not add them to this app.
+
+   The runtime inside the zip is the official Windows wheels, extracted so the
+   app can load them without pip. They stay outside the base installer:
+
+   ONNX Runtime 1.23.2
+   License : MIT  — licenses\ONNXRuntime-MIT.txt
+   Copyright (c) Microsoft Corporation.
+   Source  : https://github.com/microsoft/onnxruntime
+
+   Hugging Face tokenizers 0.21.4
+   License : Apache License 2.0  — licenses\Apache-2.0.txt
+   Copyright 2019 The HuggingFace Team.
+   Source  : https://github.com/huggingface/tokenizers
+
+   NumPy 2.2.6
+   License : BSD 3-Clause  — licenses\NumPy-BSD-3-Clause.txt
+   Copyright (c) 2005-2024, NumPy Developers.
+   Source  : https://numpy.org/
+
+   PyYAML 6.0.2
+   License : MIT  — licenses\PyYAML-MIT.txt
+   Copyright (c) 2017-2021 Ingy döt Net
+   Copyright (c) 2006-2016 Kirill Simonov
+   Source  : https://github.com/yaml/pyyaml
+
+
 Nothing in the license terms of 핀캡처 restricts modification of the above libraries for your
 own use or reverse engineering for debugging such modifications.

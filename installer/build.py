@@ -9,6 +9,7 @@
 #                     prints on a cp1252 CI console
 #   v0.9.0 2026-10-26 Grok 4.7 — release note lists markup, eyedropper, and ruler shortcuts
 #   v0.8.0 2026-10-26 Grok 4.7 — bundle check also requires the Windows OCR extension to be packed
+#   v0.10.0 2026-10-27 Grok 4.7 — bundle check rejects the optional formula runtime and weights
 #   v0.8.0 2026-10-26 Grok 4.7 — if installer/build is locked, say which PinCapture.exe to close;
 #                     smoke test runs in an isolated home (own config.json and save_dir)
 """
@@ -143,17 +144,22 @@ MUST_HAVE = ["PinCapture.exe", "_internal/PySide6/Qt6Core.dll", "_internal/PySid
              "_internal/PySide6/plugins/imageformats/qico.dll", "_internal/pynput/keyboard/_win32.py"]
 MUST_NOT = ["libssl-3-x64.dll", "libcrypto-3-x64.dll", "qopensslbackend.dll", "qtiff.dll", "qwebp.dll",
             "qsvg.dll", "opengl32sw.dll", "qt6pdf.dll"]
+# Optional formula model (233,421,946 bytes) and its runtime stay out of the base installer.
+MATH_LEAK = ("onnxruntime", "tokenizers", "pp_formulanet", "pix2tex")
 
 
 def check_contents(app: Path) -> None:
     """The notices (THIRD_PARTY_NOTICES.txt) describe exactly this set — fail if the bundle drifts."""
     missing = [p for p in MUST_HAVE if not (app / p).exists()]
-    names = {f.name.lower() for f in app.rglob("*") if f.is_file()}
+    files = [f for f in app.rglob("*") if f.is_file()]
+    names = {f.name.lower() for f in files}
     present = [n for n in MUST_NOT if n.lower() in names]
-    ocr = [p for p in app.rglob("*") if p.is_file() and p.suffix.lower() in {".pyd", ".dll"}
+    rel = [str(f.relative_to(app)).replace("\\", "/").lower() for f in files]
+    leaked = [p for p in rel if any(part in p for part in MATH_LEAK)]
+    ocr = [p for p in files if p.suffix.lower() in {".pyd", ".dll"}
            and "ocr" in str(p).lower().replace("\\", "/")]
-    if missing or present or not ocr:
-        sys.exit(f"bundle check failed: missing={missing} unexpected={present} ocr={ocr}")
+    if missing or present or leaked or not ocr:
+        sys.exit(f"bundle check failed: missing={missing} unexpected={present} leaked={leaked} ocr={ocr}")
     print("bundle contents ok")
 
 

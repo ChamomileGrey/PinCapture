@@ -2,7 +2,7 @@
 
 새 유지보수 담당자용 `pincapture.py` 지도. 앱 전체가 저장소 루트의 파일 하나(약 2,400줄)에 있다.
 
-- 작성 기준: `APP_VERSION = "0.9.1"` (2026-10-26). 내용이 코드와 다르면 **코드가 맞다**.
+- 작성 기준: `APP_VERSION = "0.10.0"` (2026-10-27). 내용이 코드와 다르면 **코드가 맞다**.
 - 줄 번호는 금방 바뀌므로 쓰지 않음. 함수·클래스 이름으로 찾을 것 (`Ctrl+F` / `grep -n "def 이름"`).
 - 아래 절 순서 = 파일 안의 순서.
 - 관련: 실행·빌드 안내 `docs/DEVELOPMENT.md` (일부 오래됨), 빌드 `installer/build.py`, 설치 스크립트 `installer/PinCapture.iss`, 시험 `tests/`.
@@ -165,11 +165,13 @@ Windows 가 아니면 `capture_active_window` 는 마우스가 있는 모니터 
 
 - `PinWindow(image, dpr)`: 프레임 없는 항상-위 `Tool` 창, `WA_DeleteOnClose`. 논리 크기 = 픽셀 / `dpr` x `_scale`.
 - 드래그 이동, 휠 확대/축소 (x1.1, 0.15~5.0), Ctrl+휠은 투명도 단계(100/80/60/40%), 더블클릭·`Esc` 닫기. 표시 중(`begin_markup`)에는 왼쪽 드래그가 그림이고 핀은 움직이지 않으며, `Esc`는 `end_markup`만 한다.
-- 우클릭 메뉴(`build_menu` / `contextMenuEvent`): 글자 복사(OCR) / 클립보드에 복사 / 다른 이름으로 저장 / 원본 크기 / 표시 / 스포이트 / 자 / 투명도 / 클릭 통과 / 닫기.
+- 우클릭 메뉴(`build_menu` / `contextMenuEvent`): 글자 복사 하위 메뉴(`build_ocr_mode_menu`: 글자 / 표 (엑셀) / 표 (Markdown) / 수식) / 클립보드에 복사 / 다른 이름으로 저장 / 원본 크기 / 표시 / 스포이트 / 자 / 투명도 / 클릭 통과 / 닫기. `acts["ocr"]` 는 글자 동작이다.
 - 표시는 이미지 픽셀 좌표의 `Mark` 목록. `compose_marks`가 복사·저장용 이미지를 만들고, `copy_ocr`는 `image_for_ocr()`(원본)을 쓴다. `MarkupBar`는 표시를 시작할 때만 뜨는 별도 창이다.
 - 스포이트·자는 `ScreenInspectSession` / `InspectOverlay`. 영역 캡처와 같이 모니터별 정지 화면이고, `physical_point`로 물리 픽셀을 고른다. `screens_capture_blocked`면 오버레이를 띄우지 않는다.
 - `set_click_through`: `WindowTransparentForInput` 과 Windows `WS_EX_TRANSPARENT`. 켠 뒤에는 핀으로 끌 수 없고, `MainToolbar.clear_click_through`(트레이·단축키 `clickthrough`)만 끈다.
-- `recognize_image`: PyWinRT `Windows.Media.Ocr`. 가져오기 실패·언어 팩 없음은 안내 문장으로 반환(우회 없음).
+- `recognize_image(image, mode="text")`: PyWinRT `Windows.Media.Ocr` 단어 상자. `text` 는 `reconstruct_paragraphs`(하드 랩은 잇고 문단은 남김). `table` / `table-md` 는 `table_from_words` → TSV / Markdown. 가져오기 실패·언어 팩 없음은 안내 문장으로 반환(우회 없음). 글자 모드는 `recognize_image(image)` 한 인자로도 동작한다.
+- `math` 는 Windows OCR 보다 먼저 `math_status()` 를 본다. `"ok"` 일 때만 `predict_latex`(로컬 ONNX, CPU). `recognize_image` 는 네트워크를 열지 않는다. 모델 파일은 `math_model_files()` 가 `PINCAPTURE_MATH_DIR`, `CONFIG_DIR/models/formula`, `CONFIG_DIR/math/models`, `app_dir()/math/models` 에서 찾는다. 런타임(`onnxruntime`, `tokenizers`, `numpy`, YAML 토크나이저일 때 `yaml`)은 리터럴 import 가 없고, `CONFIG_DIR/math` 또는 `app_dir()/math` 가 `sys.path` 에 있을 때만 불러온다. 기본 설치 파일에는 넣지 않는다.
+- 수식이 없을 때 `copy_ocr("math")` 와 보관함 직접 인식은 `ensure_math_installed` 를 부른다. 설치 창에서 **설치**를 눌러야 `install_math_pack` 이 `MATH_PACK_URL`(GitHub 릴리스의 `PinCapture-Math-<버전>.zip`)을 받는다. 부분 파일은 `CONFIG_DIR/downloads/*.partial` 이고 Range 로 이어받는다. zip SHA-256 과 안의 onnx·`inference.yml` SHA-256 을 확인한 뒤 `math/` 와 `models/formula/` 에 푼다. 설정 창의 **수식 기능 제거**는 `remove_math_component`.
 - `closed(self)` → `MainToolbar._on_pin_closed` 가 `_pins` 에서 빼고 `RecentPinStore.remember` (임시 폴더 PNG + 메모리). `reopen_recent_pin` 이 최신 항목을 다시 `_make_pin`.
 
 ---
@@ -266,7 +268,7 @@ Qt 플랫폼이 `windows` 가 아니면(offscreen 등) 바로 `False` — `winId
 - `QShortcut` 3개 (`WidgetWithChildrenShortcut`): `Copy` → `_copy_selected`, `Delete` → `_remove_selected`, `SelectAll` → `listw.selectAll` (리스트 기본 Ctrl+C 텍스트 복사를 덮어씀).
 - 맨 아래 `info` 라벨 (`_refresh_info`).
 - 스타일시트는 `_build_ui`, `ToolButton`, `IconToolButton`, `_header_btn` 에 직접 있음. 간격은 8px 격자(바깥 여백 16).
-- `_update_tooltips()`: 캡처·아이콘 버튼 툴팁에 현재 단축키 표시. `_sync_pin_tools()`: 선택된 캡처나 맨 앞 핀이 없으면 그리기·OCR 을 끈다. `_markup_current` / `_ocr_current` 는 선택된 보관함 이미지를 우선하고, 없으면 맨 앞 핀을 쓴다. 보관함 이미지를 그릴 때는 같은 `cacheKey` 의 핀을 재사용한다.
+- `_update_tooltips()`: 캡처·아이콘 버튼 툴팁에 현재 단축키 표시. `_sync_pin_tools()`: 선택된 캡처나 맨 앞 핀이 없으면 그리기·OCR 을 끈다. `_markup_current` / `_ocr_current` 는 선택된 보관함 이미지를 우선하고, 없으면 맨 앞 핀을 쓴다. 보관함 이미지를 그릴 때는 같은 `cacheKey` 의 핀을 재사용한다. `btn_ocr` 왼쪽 클릭은 글자 모드(`clicked` 의 bool 을 모드로 받지 않음). 우클릭은 `build_ocr_mode_menu` 와 같은 목록이다. 아이콘 전용이고 붙박이 메뉴는 없다.
 
 ### 12.3 트레이와 창 동작
 
@@ -484,6 +486,7 @@ sequenceDiagram
 | `PINCAP_TEST_RESTART` | 수동 시험 | 시작 1.5초 뒤 `restart_app` |
 | `PYINSTALLER_RESET_ENVIRONMENT` | `restart_app` (EXE) | 새 프로세스가 곧 정리될 부모의 PyInstaller 런타임을 물려받지 않게 |
 | `QT_QPA_PLATFORM=offscreen` | `tests/`, `build.py` 연기 시험, `main`(Windows 외 `--selftest`) | 화면 없이 Qt 실행. 이때 트레이 없음(`_tray is None`), `force_foreground` 는 아무것도 안 함 |
+| `PINCAPTURE_MATH_DIR` | 사용자가 직접 | 수식 ONNX·토크나이저를 추가로 찾을 폴더. 비어 있으면 설치 버튼이 푼 `~/.pincapture/models/formula` 와 `~/.pincapture/math` 를 쓴다 |
 
 ---
 

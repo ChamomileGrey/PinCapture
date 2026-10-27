@@ -27,7 +27,9 @@
 #                      화면 색 스포이트, 두 점 사이 픽셀 자. 메인 창 버튼은 그대로
 #   v0.9.1 2026-10-26  Grok (Grok 4.7) — 메인 창 상단을 압축하고, 표시·스포이트·자·글자 복사·
 #                      최근 핀을 캡처 줄 오른쪽의 작은 아이콘으로 배치
-#   Created: 2026-08-04 by Claude via claude.ai / Modified: 2026-10-26 by Grok 4.7 via Cursor
+#   v0.10.0 2026-10-27 Grok (Grok 4.7) — 글자 복사에 문단 맞추기, 표(TSV·Markdown), 수식(LaTeX).
+#                      수식은 기본 설치에 넣지 않고, 설치를 눌렀을 때만 받는다
+#   Created: 2026-08-04 by Claude via claude.ai / Modified: 2026-10-27 by Grok 4.7 via Cursor
 #   빌드: installer/build.py  (PyInstaller onedir + Inno Setup → PinCapture-Setup-<버전>.exe)
 """
 핀캡처 (PinCapture) — 화면 캡처 도구
@@ -37,7 +39,7 @@
   · 창 캡처 (현재 활성 창, Windows에서 PrintWindow 사용)
   · 전체 화면 캡처 (마우스가 있는 모니터)
   · 핀 고정 (캡처한 이미지를 항상 위 창으로 화면에 고정)
-  · 핀 우클릭: 글자 복사(Windows OCR), 투명도, 클릭 통과
+  · 핀 우클릭: 글자 복사(문단·표·수식, Windows OCR / 선택 수식 모델), 투명도, 클릭 통과
   · 핀 위 표시: 화살표, 네모, 형광펜, 모자이크 (복사·저장에 합성, OCR 은 원본)
   · 스포이트(화면 색 HEX), 자(두 점의 물리 픽셀 거리)
   · 닫은 핀 다시 열기 (전역 단축키·트레이)
@@ -65,7 +67,7 @@ IS_WINDOWS = sys.platform == "win32"
 _NO_WINDOW = 0x08000000 if IS_WINDOWS else 0   # subprocess.CREATE_NO_WINDOW
 
 APP_NAME = "핀캡처"
-APP_VERSION = "0.9.1"
+APP_VERSION = "0.10.0"
 APP_PUBLISHER = "캐모마일그레이"                 # 정보 창에 보이는 이름
 APP_PUBLISHER_EN = "ChamomileGrey"             # 설치 정보·EXE 속성과 같은 영문 이름
 KOFI_URL = "https://ko-fi.com/chamomilegrey"   # 후원하기. 이 주소만 연다
@@ -268,8 +270,8 @@ except ImportError as _e:
     _handle_missing_deps(_e)
     raise
 from PySide6.QtCore import (
-    Qt, QItemSelectionModel, QMimeData, QObject, QPoint, QPointF, QRect, QSize,
-    QStandardPaths, QTimer, QUrl, Signal,
+    Qt, QEventLoop, QItemSelectionModel, QMimeData, QObject, QPoint, QPointF, QRect, QSize,
+    QStandardPaths, QThread, QTimer, QUrl, Signal,
 )
 from PySide6.QtGui import (
     QBrush, QColor, QCursor, QDesktopServices, QFont, QFontDatabase, QGuiApplication, QIcon,
@@ -281,7 +283,7 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListView,
     QGridLayout, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton, QSpinBox,
-    QSplitter, QSystemTrayIcon, QToolButton, QVBoxLayout, QWidget,
+    QSplitter, QSystemTrayIcon, QToolButton, QVBoxLayout, QWidget, QProgressDialog,
 )
 
 def _singleton_name() -> str:
@@ -1353,7 +1355,63 @@ OCR_NO_LANGUAGE_MSG = (
 OCR_EMPTY_MSG = "이미지에서 글자를 찾지 못했어요."
 OCR_FAILED_MSG = "글자를 읽지 못했어요. 잠시 뒤 다시 시도해 주세요."
 OCR_COPIED_MSG = "글자를 복사했어요."
+OCR_TABLE_COPIED_MSG = "표를 복사했어요. 엑셀에 붙여 넣으면 칸으로 들어가요."
+OCR_TABLE_MD_MSG = "표를 Markdown으로 복사했어요."
+OCR_TABLE_EMPTY_MSG = "표로 읽을 칸을 찾지 못했어요."
+MATH_MISSING_MSG = (
+    "수식 기능이 아직 없어요.\n"
+    "글자 복사의 수식을 고르면 설치할 수 있어요. "
+    "설치를 누르기 전에는 파일을 받지 않아요.\n"
+    "글자와 표 복사는 그대로 쓸 수 있어요."
+)
+MATH_RUNTIME_MSG = (
+    "수식 파일을 찾았지만 실행할 수 없어요.\n"
+    "글자 복사의 수식을 다시 고르면 구성 요소를 받을 수 있어요.\n"
+    "글자와 표 복사는 그대로 쓸 수 있어요."
+)
+# 설치 확인 창의 본문. 버튼은 설치 / 취소.
+MATH_INSTALL_TITLE = "수식 기능 설치 (약 214MB 다운로드)"
+MATH_INSTALL_CANCELLED_MSG = "수식 기능 설치를 취소했어요."
+MATH_INSTALL_FAILED_MSG = (
+    "수식 기능을 받지 못했어요. 인터넷 연결을 확인한 뒤 다시 시도해 주세요."
+)
+MATH_INSTALL_HASH_MSG = "받은 파일이 손상됐어요. 다시 시도해 주세요."
+MATH_REMOVE_MSG = "받아 둔 수식 파일을 지울까요?"
+# 릴리스에 붙는 선택 구성 요소. 기본 설치 파일에는 없다.
+# 해시와 크기는 installer/build_math_pack.py 가 만든 zip 과 같아야 한다.
+MATH_PACK_NAME = f"PinCapture-Math-{APP_VERSION}.zip"
+MATH_PACK_URL = (
+    "https://github.com/ChamomileGrey/PinCapture/releases/download/"
+    f"v{APP_VERSION}/{MATH_PACK_NAME}"
+)
+MATH_PACK_SHA256 = "26f920415c1e2d933cb5b1c2d9f84fa5fb9ca2125f35645f779df4a4bc28db2c"
+MATH_PACK_BYTES = 213922566
+MATH_ONNX_SHA256 = "30998d10c94ccff1ad8981df0c71048cb1f3eec7b1e515b809767f1f72aebe3b"
+MATH_TOKENIZER_SHA256 = "96062655d94c21d39274328dbc82c1a487e66addb8425f5a7fd5b7dfb2421ec3"
+MATH_PACK_ONNX = "models/formula/pp_formulanet_plus_s.onnx"
+MATH_PACK_TOKENIZER = "models/formula/inference.yml"
+MATH_FAILED_MSG = "수식을 읽지 못했어요. 수식만 보이게 다시 찍어 주세요."
+MATH_EMPTY_MSG = "이미지에서 수식을 찾지 못했어요."
+MATH_COPIED_MSG = "수식을 LaTeX로 복사했어요."
+# (모드, 메뉴 이름). 핀 우클릭과 글자 복사 버튼의 우클릭이 같은 목록을 쓴다.
+OCR_MODE_ACTIONS = (
+    ("text", "글자"),
+    ("table", "표 (엑셀)"),
+    ("table-md", "표 (Markdown)"),
+    ("math", "수식"),
+)
 _OCR_LANG_ORDER = ("ko-KR", "ko", "en-US", "en")
+# PP-FormulaNet_plus-S 입력. L 계열만 768, 나머지는 384.
+_MATH_CANVAS_L = 768
+_MATH_CANVAS = 384
+_MATH_ONNX_NAMES = (
+    "pp_formulanet_plus_s.onnx",
+    "pp_formulanet_plus_m.onnx",
+    "pp_formulanet_plus_l.onnx",
+    "model.onnx",
+)
+_MATH_TOKENIZER_NAMES = ("tokenizer.json", "inference.yml", "inference.yaml")
+_math_cache = {"key": None, "session": None, "tokenizer": None}
 
 
 class OcrResult:
@@ -1537,11 +1595,1028 @@ def _await_ocr(operation):
     return operation
 
 
-def recognize_image(image: QImage) -> OcrResult:
-    """핀 이미지에서 글자를 읽는다. 모듈·언어 팩이 없으면 안내 문장을 돌려준다.
-    Windows.Media.Ocr 을 쓰며, 한국어를 영어보다 먼저 고른다. 화면 보호를 우회하지 않는다."""
+class OcrBox:
+    """OCR 단어·줄 하나의 글자와 픽셀 상자. 시험은 이 상자를 직접 만든다."""
+
+    def __init__(self, text, x, y, w, h):
+        self.text = "" if text is None else str(text)
+        self.x = float(x)
+        self.y = float(y)
+        self.w = float(w)
+        self.h = float(h)
+
+    @property
+    def x2(self) -> float:
+        return self.x + self.w
+
+    @property
+    def y2(self) -> float:
+        return self.y + self.h
+
+    @property
+    def cy(self) -> float:
+        return self.y + self.h / 2.0
+
+
+def _median(values) -> float:
+    vals = sorted(float(v) for v in values)
+    if not vals:
+        return 0.0
+    mid = len(vals) // 2
+    if len(vals) % 2:
+        return vals[mid]
+    return (vals[mid - 1] + vals[mid]) / 2.0
+
+
+def _as_box(word) -> "OcrBox | None":
+    if isinstance(word, OcrBox):
+        box = word
+    else:
+        text = getattr(word, "text", "")
+        try:
+            box = OcrBox(text, word.x, word.y, word.w, word.h)
+        except Exception:
+            return None
+    if not box.text.strip() or box.w <= 0 or box.h <= 0:
+        return None
+    return box
+
+
+def _clean_boxes(words) -> list:
+    out = []
+    for word in words or []:
+        box = _as_box(word)
+        if box is not None:
+            out.append(box)
+    return out
+
+
+def _is_hangul(ch: str) -> bool:
+    if not ch:
+        return False
+    o = ord(ch)
+    return (
+        0xAC00 <= o <= 0xD7A3
+        or 0x1100 <= o <= 0x11FF
+        or 0x3130 <= o <= 0x318F
+        or 0xA960 <= o <= 0xA97F
+        or 0xD7B0 <= o <= 0xD7FF
+    )
+
+
+def _sentence_end(text: str) -> bool:
+    t = (text or "").rstrip().rstrip("\"'”’)]}")
+    if not t:
+        return False
+    if t.endswith("...") or t.endswith("…"):
+        return True
+    return t[-1] in ".?!。！？"
+
+
+def _cluster_rows(words) -> list:
+    """세로 위치가 가까운 단어를 한 줄로 모은다."""
+    words = _clean_boxes(words)
+    if not words:
+        return []
+    mh = _median(w.h for w in words) or 1.0
+    words = sorted(words, key=lambda w: (w.cy, w.x))
+    rows = []
+    for word in words:
+        if rows and abs(word.cy - _median(b.cy for b in rows[-1])) <= 0.55 * mh:
+            rows[-1].append(word)
+        else:
+            rows.append([word])
+    for row in rows:
+        row.sort(key=lambda b: b.x)
+    return rows
+
+
+def _char_width(words) -> float:
+    samples = []
+    for word in words:
+        samples.append(word.w / max(len(word.text.strip()), 1))
+    return _median(samples) or 8.0
+
+
+def _join_word_text(words) -> str:
+    """한 줄·한 칸 안의 토큰. OCR 이 이미 띄어 쓴 단어라 공백으로 잇는다."""
+    return " ".join(w.text.strip() for w in words if w.text.strip())
+
+
+def _split_gaps(row, gap_thr: float) -> list:
+    groups = [[row[0]]]
+    for prev, word in zip(row, row[1:]):
+        if word.x - prev.x2 > gap_thr:
+            groups.append([word])
+        else:
+            groups[-1].append(word)
+    return groups
+
+
+def _box_from_words(words) -> OcrBox:
+    x = min(w.x for w in words)
+    y = min(w.y for w in words)
+    x2 = max(w.x2 for w in words)
+    y2 = max(w.y2 for w in words)
+    return OcrBox(_join_word_text(words), x, y, max(1.0, x2 - x), max(1.0, y2 - y))
+
+
+def lines_from_words(words, column_gap_factor: float = 3.0) -> list:
+    """단어 상자를 읽기 순서의 줄로 만든다.
+
+    한 줄 안에서 간격이 크게 벌어지면 다른 단으로 보고, 왼쪽 단부터 위에서 아래로 읽는다.
+    모든 줄이 한 덩어리면 들여쓰기는 단으로 나누지 않는다.
+    """
+    rows = _cluster_rows(words)
+    if not rows:
+        return []
+    flat = [w for row in rows for w in row]
+    cw = _char_width(flat)
+    mh = _median(w.h for w in flat) or 1.0
+    gap_thr = max(column_gap_factor * cw, 1.1 * mh)
+    per_row = []
+    multi = False
+    for row in rows:
+        groups = _split_gaps(row, gap_thr)
+        if len(groups) > 1:
+            multi = True
+        per_row.append([_box_from_words(g) for g in groups])
+    lines = [seg for row in per_row for seg in row]
+    if not multi or len(lines) < 2:
+        lines.sort(key=lambda s: (s.y, s.x))
+        return lines
+    tol = max(2.0 * cw, mh)
+    anchors = []
+    for seg in sorted(lines, key=lambda s: s.x):
+        if not anchors or seg.x - anchors[-1] > tol:
+            anchors.append(seg.x)
+
+    def col(seg) -> int:
+        return min(range(len(anchors)), key=lambda i: abs(anchors[i] - seg.x))
+
+    lines.sort(key=lambda s: (col(s), s.y, s.x))
+    return lines
+
+
+def _same_column(a: OcrBox, b: OcrBox, cw: float) -> bool:
+    overlap = min(a.x2, b.x2) - max(a.x, b.x)
+    narrower = min(a.w, b.w)
+    if narrower > 0 and overlap >= 0.3 * narrower:
+        return True
+    return abs(a.x - b.x) <= 2.0 * cw
+
+
+def _block_width(line: OcrBox, lines, cw: float) -> float:
+    same = [ln.w for ln in lines if _same_column(line, ln, cw)]
+    return max(same) if same else line.w
+
+
+def _continues_paragraph(prev: OcrBox, nxt: OcrBox, lines, mh: float, cw: float) -> bool:
+    """같은 문단의 다음 줄이면 True. 빈 줄·짧은 문장 끝·다른 단은 문단을 나눈다."""
+    if not _same_column(prev, nxt, cw):
+        return False
+    gap = nxt.y - prev.y2
+    if gap > 0.60 * mh:
+        return False
+    block = _block_width(prev, lines, cw)
+    if prev.w < 0.82 * block and _sentence_end(prev.text):
+        return False
+    return True
+
+
+def _join_wrapped(left: str, right: str, prev: OcrBox, col_right: float, cw: float) -> str:
+    """한 문단 안에서 하드 랩된 두 줄을 잇는다.
+
+    영어 줄끝 하이픈은 빼고, 오른쪽 끝에 붙은 한글 한 음절은 다음 음절과 붙인다.
+    그 밖에는 띄어 쓴다. 한국어 워드랩(단어 경계)과 영어에 공통으로 맞춘 규칙이다.
+    """
+    left = left.rstrip()
+    right = right.lstrip()
+    if not left:
+        return right
+    if not right:
+        return left
+    flush = prev.x2 >= col_right - 1.2 * cw
+    if flush and left.endswith("-") and not left.endswith("--"):
+        if right[:1].isascii() and right[:1].islower():
+            return left[:-1] + right
+    if flush and _is_hangul(left[-1]) and _is_hangul(right[0]):
+        last = left.split()[-1] if left.split() else left
+        if len(last) == 1:
+            return left + right
+    return left + " " + right
+
+
+def _join_line_group(group) -> str:
+    cw = _char_width(group) or 8.0
+    col_right = max(b.x2 for b in group)
+    text = group[0].text.strip()
+    for prev, nxt in zip(group, group[1:]):
+        text = _join_wrapped(text, nxt.text.strip(), prev, col_right, cw)
+    return text
+
+
+def join_paragraphs(lines) -> str:
+    """읽기 순서의 줄 상자를 문단 문자열로 만든다. 문단 사이는 빈 줄이다."""
+    lines = [ln for ln in (_as_box(ln) for ln in (lines or [])) if ln is not None]
+    if not lines:
+        return ""
+    mh = _median(ln.h for ln in lines) or 1.0
+    cw = _char_width(lines) or 8.0
+    paragraphs = []
+    current = [lines[0]]
+
+    def flush():
+        if current:
+            paragraphs.append(_join_line_group(current))
+            current.clear()
+
+    for prev, nxt in zip(lines, lines[1:]):
+        if not _continues_paragraph(prev, nxt, lines, mh, cw):
+            flush()
+        current.append(nxt)
+    flush()
+    return "\n\n".join(p for p in paragraphs if p)
+
+
+def reconstruct_paragraphs(words) -> str:
+    """단어 상자에서 하드 랩을 이어 붙이고 문단 나눔은 남긴다."""
+    return join_paragraphs(lines_from_words(words))
+
+
+def table_from_words(words) -> list:
+    """단어 상자를 표 칸(행 리스트)으로 맞춘다. 칸이 없으면 빈 리스트."""
+    rows = _cluster_rows(words)
+    if not rows:
+        return []
+    flat = [w for row in rows for w in row]
+    cw = _char_width(flat) or 8.0
+    mh = _median(w.h for w in flat) or 1.0
+    gap_thr = max(1.6 * cw, 0.45 * mh)
+    row_cells = []
+    edges = []
+    for row in rows:
+        cells = _split_gaps(row, gap_thr)
+        row_cells.append(cells)
+        for cell in cells:
+            edges.append(cell[0].x)
+    edges.sort()
+    tol = max(1.5 * cw, 4.0)
+    clusters = []
+    for x in edges:
+        if not clusters or x - clusters[-1][-1] > tol:
+            clusters.append([x])
+        else:
+            clusters[-1].append(x)
+    anchors = [sum(c) / len(c) for c in clusters] or [0.0]
+    grid = []
+    for cells in row_cells:
+        out = [""] * len(anchors)
+        for cell in cells:
+            idx = min(range(len(anchors)), key=lambda i: abs(anchors[i] - cell[0].x))
+            text = _join_word_text(cell)
+            out[idx] = (out[idx] + " " + text).strip() if out[idx] else text
+        grid.append(out)
+    keep = [i for i in range(len(anchors)) if any(row[i].strip() for row in grid)]
+    grid = [[row[i] for i in keep] for row in grid]
+    return [row for row in grid if any(cell.strip() for cell in row)]
+
+
+def _plain_cell(text, escape_bar: bool = False) -> str:
+    s = " ".join(str(text).replace("\t", " ").replace("\r", " ").splitlines()).strip()
+    if escape_bar:
+        s = s.replace("|", "\\|")
+    return s
+
+
+def grid_to_tsv(grid) -> str:
+    """엑셀에 붙여 넣으면 칸이 되는 탭 구분 텍스트."""
+    return "\n".join("\t".join(_plain_cell(c) for c in row) for row in grid)
+
+
+def grid_to_markdown(grid) -> str:
+    """첫 줄을 헤더로 하는 Markdown 표."""
+    if not grid:
+        return ""
+    width = max(len(row) for row in grid)
+
+    def pad(row) -> str:
+        vals = [_plain_cell(c, escape_bar=True) for c in row]
+        vals.extend([""] * (width - len(vals)))
+        return "| " + " | ".join(vals) + " |"
+
+    lines = [pad(grid[0]), "| " + " | ".join(["---"] * width) + " |"]
+    lines.extend(pad(row) for row in grid[1:])
+    return "\n".join(lines)
+
+
+def _words_from_ocr_result(result) -> list:
+    """Windows.Media.Ocr 결과에서 단어 상자를 뽑는다. 상자가 없으면 빈 리스트."""
+    lines = getattr(result, "lines", None)
+    if not lines:
+        return []
+    words = []
+    for line in lines:
+        for word in getattr(line, "words", None) or []:
+            rect = getattr(word, "bounding_rect", None)
+            if rect is None:
+                rect = getattr(word, "boundingRect", None)
+            text = getattr(word, "text", "") or ""
+            if rect is None or not str(text).strip():
+                continue
+            words.append(OcrBox(
+                text,
+                getattr(rect, "x", 0),
+                getattr(rect, "y", 0),
+                getattr(rect, "width", 0),
+                getattr(rect, "height", 0),
+            ))
+    return words
+
+
+def _math_search_dirs() -> list:
+    """수식 모델 파일을 찾을 폴더. 받기 자체는 설치를 누른 뒤 install_math_pack 만 한다."""
+    dirs = []
+    env = os.environ.get("PINCAPTURE_MATH_DIR", "").strip()
+    if env:
+        root = Path(env)
+        dirs.append(root)
+        dirs.append(root / "models")
+    dirs.append(CONFIG_DIR / "models" / "formula")
+    dirs.append(CONFIG_DIR / "math" / "models")
+    dirs.append(app_dir() / "math" / "models")
+    seen = set()
+    out = []
+    for folder in dirs:
+        key = str(folder)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(folder)
+    return out
+
+
+def _math_addon_dirs() -> list:
+    """pip --target 로 풀어 둔 수식 런타임. 기본 설치 파일에는 없다."""
+    dirs = []
+    env = os.environ.get("PINCAPTURE_MATH_DIR", "").strip()
+    if env:
+        root = Path(env)
+        dirs.append(root)
+        dirs.append(root.parent)
+    dirs.append(CONFIG_DIR / "math")
+    dirs.append(app_dir() / "math")
+    seen = set()
+    out = []
+    for folder in dirs:
+        key = str(folder)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(folder)
+    return out
+
+
+def math_model_files():
+    """(onnx 경로, 토크나이저 경로). 없으면 (None, None)."""
+    for folder in _math_search_dirs():
+        if not folder.is_dir():
+            continue
+        onnx = next((folder / name for name in _MATH_ONNX_NAMES if (folder / name).is_file()), None)
+        tok = next((folder / name for name in _MATH_TOKENIZER_NAMES if (folder / name).is_file()), None)
+        if onnx is not None and tok is not None:
+            return onnx, tok
+    return None, None
+
+
+def _load_module(name: str):
+    import importlib
+    return importlib.import_module(name)
+
+
+def _math_module_names(tokenizer_is_yaml: bool) -> list:
+    # 이름을 붙여 만든다. 리터럴 import 가 되면 설치 파일이 수식 런타임을 끌고 들어온다.
+    names = ["num" + "py", "onnx" + "runtime", "token" + "izers"]
+    if tokenizer_is_yaml:
+        names.append("ya" + "ml")
+    return names
+
+
+def _prepare_math_imports() -> None:
+    for folder in _math_addon_dirs():
+        pkg = folder / ("onnx" + "runtime")
+        if not pkg.is_dir():
+            continue
+        path = str(folder)
+        if path not in sys.path:
+            sys.path.insert(0, path)
+        if not (IS_WINDOWS and hasattr(os, "add_dll_directory")):
+            continue
+        dll_dirs = [pkg / "capi"]
+        try:
+            for sub in folder.iterdir():
+                if sub.is_dir() and sub.name.endswith(".libs"):
+                    dll_dirs.append(sub)
+        except OSError:
+            pass
+        for dll_dir in dll_dirs:
+            if not dll_dir.is_dir():
+                continue
+            try:
+                os.add_dll_directory(str(dll_dir))
+            except Exception:
+                pass
+
+
+def _math_modules_ready(tok_path: Path) -> bool:
+    _prepare_math_imports()
+    yaml = tok_path.suffix.lower() in {".yml", ".yaml"}
+    for name in _math_module_names(yaml):
+        try:
+            _load_module(name)
+        except Exception:
+            return False
+    return True
+
+
+def math_status() -> str:
+    """'ok' | 'no-model' | 'no-runtime'. 파일을 받거나 네트워크를 열지 않는다."""
+    onnx, tok = math_model_files()
+    if onnx is None or tok is None:
+        return "no-model"
+    if not _math_modules_ready(tok):
+        return "no-runtime"
+    return "ok"
+
+
+def _find_key(node, key):
+    if isinstance(node, dict):
+        if key in node:
+            return node[key]
+        for value in node.values():
+            found = _find_key(value, key)
+            if found is not None:
+                return found
+    elif isinstance(node, list):
+        for value in node:
+            found = _find_key(value, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _load_tokenizer(path: Path):
+    tokenizers = _load_module("token" + "izers")
+    tokenizer_cls = tokenizers.Tokenizer
+    if path.suffix.lower() == ".json":
+        return tokenizer_cls.from_file(str(path))
+    yaml = _load_module("ya" + "ml")
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    blob = _find_key(data, "fast_tokenizer_file")
+    if blob is None:
+        raise ValueError("tokenizer")
+    raw = blob if isinstance(blob, str) else json.dumps(blob)
+    tok = tokenizer_cls.from_str(raw)
+    config = _find_key(data, "tokenizer_config_file")
+    added = config.get("added_tokens_decoder") if isinstance(config, dict) else None
+    if not isinstance(added, dict):
+        return tok
+    specials = []
+    normals = []
+    for idx, token in sorted(added.items(), key=lambda kv: int(kv[0])):
+        if not isinstance(token, dict):
+            continue
+        content = token.get("content") or ""
+        if not content or tok.token_to_id(content) is not None:
+            continue
+        piece = tokenizers.AddedToken(content, special=bool(token.get("special")))
+        (specials if piece.special else normals).append(piece)
+    if specials:
+        tok.add_special_tokens(specials)
+    if normals:
+        tok.add_tokens(normals)
+    return tok
+
+
+def _formula_canvas_size(path: Path) -> int:
+    stem = path.stem.lower().replace("-", "_")
+    if stem.endswith("_l"):
+        return _MATH_CANVAS_L
+    return _MATH_CANVAS
+
+
+def _qimage_rgb_array(image: QImage, np):
+    im = image.convertToFormat(QImage.Format.Format_RGB888)
+    w, h = im.width(), im.height()
+    bpl = im.bytesPerLine()
+    mv = memoryview(im.constBits())
+    raw = bytes(mv[:h * bpl])
+    arr = np.frombuffer(raw, dtype=np.uint8).reshape(h, bpl)
+    return arr[:, :w * 3].reshape(h, w, 3).copy()
+
+
+def _array_to_qimage(arr) -> QImage:
+    h, w = arr.shape[:2]
+    im = QImage(arr.tobytes(), w, h, w * 3, QImage.Format.Format_RGB888)
+    return im.copy()
+
+
+def _formula_input(image: QImage, np, size: int):
+    """PP-FormulaNet 전처리. 여백을 자르고 정사각으로 맞춘 뒤 정규화한다. 네트워크 없음."""
+    arr = _qimage_rgb_array(image, np)
+    gray = arr.astype(np.float32).mean(axis=2)
+    max_val = float(gray.max())
+    min_val = float(gray.min())
+    if max_val != min_val:
+        stretched = (gray - min_val) / (max_val - min_val) * 255.0
+        ys, xs = np.where(stretched < 200)
+        if len(xs):
+            arr = arr[int(ys.min()):int(ys.max()) + 1, int(xs.min()):int(xs.max()) + 1]
+    im = _array_to_qimage(np.ascontiguousarray(arr))
+    im = im.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio,
+                   Qt.TransformationMode.SmoothTransformation)
+    scaled = _qimage_rgb_array(im, np)
+    canvas = np.full((size, size, 3), 255, dtype=np.uint8)
+    h, w = scaled.shape[:2]
+    y = max(0, (size - h) // 2)
+    x = max(0, (size - w) // 2)
+    canvas[y:y + h, x:x + w] = scaled[:min(h, size - y), :min(w, size - x)]
+    img = canvas.astype(np.float32) / 255.0
+    mean = np.array([0.7931, 0.7931, 0.7931], dtype=np.float32)
+    std = np.array([0.1738, 0.1738, 0.1738], dtype=np.float32)
+    img = (img - mean) / std
+    channel = (0.299 * img[:, :, 0] + 0.587 * img[:, :, 1] + 0.114 * img[:, :, 2]).astype(np.float32)
+    nh = ((channel.shape[0] + 15) // 16) * 16
+    nw = ((channel.shape[1] + 15) // 16) * 16
+    if nh != channel.shape[0] or nw != channel.shape[1]:
+        padded = np.full((nh, nw), 1.0, dtype=np.float32)
+        padded[:channel.shape[0], :channel.shape[1]] = channel
+        channel = padded
+    return channel[np.newaxis, np.newaxis, :, :]
+
+
+def _math_engine():
+    onnx_path, tok_path = math_model_files()
+    if onnx_path is None or tok_path is None:
+        raise FileNotFoundError("math model")
+    key = (str(onnx_path), onnx_path.stat().st_mtime_ns, str(tok_path), tok_path.stat().st_mtime_ns)
+    if _math_cache["key"] == key and _math_cache["session"] is not None:
+        return _math_cache["session"], _math_cache["tokenizer"]
+    _prepare_math_imports()
+    ort = _load_module("onnx" + "runtime")
+    available = list(ort.get_available_providers())
+    providers = ["CPUExecutionProvider"] if "CPUExecutionProvider" in available else available[:1]
+    session = ort.InferenceSession(str(onnx_path), providers=providers)
+    tokenizer = _load_tokenizer(tok_path)
+    _math_cache.update(key=key, session=session, tokenizer=tokenizer, canvas=_formula_canvas_size(onnx_path))
+    return session, tokenizer
+
+
+def _tidy_latex(text: str) -> str:
+    text = (text or "").replace("\u0120", " ").replace("Ġ", " ").strip()
+    return " ".join(text.split())
+
+
+def predict_latex(image: QImage) -> str:
+    """로컬 ONNX 모델로 수식 이미지를 LaTeX 로 바꾼다. 여기서는 네트워크를 쓰지 않는다."""
+    np = _load_module("num" + "py")
+    session, tokenizer = _math_engine()
+    size = _math_cache.get("canvas") or _MATH_CANVAS
+    tensor = _formula_input(image, np, size)
+    name = session.get_inputs()[0].name
+    out = session.run(None, {name: tensor})
+    arr = np.array(out[0])
+    if arr.ndim == 3:
+        arr = arr.argmax(axis=-1)
+    if arr.ndim == 0:
+        seq = [int(arr)]
+    elif arr.ndim == 1:
+        seq = [int(i) for i in arr.tolist()]
+    else:
+        seq = [int(i) for i in arr.reshape(arr.shape[0], -1)[0].tolist()]
+    body = []
+    for token_id in seq:
+        if token_id in (1, 2):
+            break
+        if token_id == 0 and not body:
+            continue
+        body.append(token_id)
+    if not body:
+        return ""
+    return _tidy_latex(tokenizer.decode(body, skip_special_tokens=True))
+
+
+def _recognize_math(image: QImage) -> OcrResult:
+    status = math_status()
+    if status == "no-model":
+        return OcrResult(False, "", MATH_MISSING_MSG)
+    if status != "ok":
+        return OcrResult(False, "", MATH_RUNTIME_MSG)
+    try:
+        latex = predict_latex(image)
+    except Exception as e:
+        print(f"[math] 인식 실패: {type(e).__name__}")
+        return OcrResult(False, "", MATH_FAILED_MSG)
+    latex = (latex or "").strip()
+    if not latex:
+        return OcrResult(False, "", MATH_EMPTY_MSG)
+    return OcrResult(True, latex, MATH_COPIED_MSG)
+
+
+class MathInstallError(Exception):
+    """수식 설치 실패. message 는 사용자에게 보여줄 한국어 문장."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+class MathInstallCancelled(MathInstallError):
+    def __init__(self):
+        super().__init__(MATH_INSTALL_CANCELLED_MSG)
+
+
+def _math_download_path() -> Path:
+    return CONFIG_DIR / "downloads" / (MATH_PACK_NAME + ".partial")
+
+
+def _sha256_file(path: Path, cancelled=None, progress=None) -> str:
+    import hashlib
+    digest = hashlib.sha256()
+    done = 0
+    total = path.stat().st_size
+    with path.open("rb") as handle:
+        while True:
+            if cancelled and cancelled():
+                raise MathInstallCancelled()
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+            done += len(block)
+            if progress:
+                progress(done, total, "check")
+    return digest.hexdigest()
+
+
+def _response_header(resp, name: str):
+    headers = getattr(resp, "headers", None)
+    if headers is None:
+        return None
+    getter = getattr(headers, "get", None)
+    if getter is None:
+        return None
+    return getter(name) or getter(name.lower())
+
+
+def _response_status(resp) -> int:
+    status = getattr(resp, "status", None)
+    if status:
+        return int(status)
+    getcode = getattr(resp, "getcode", None)
+    if getcode:
+        return int(getcode())
+    return 0
+
+
+def _payload_total(resp, status: int, start: int) -> int:
+    if status == 206:
+        content_range = str(_response_header(resp, "Content-Range") or "")
+        if "/" in content_range:
+            total = content_range.rsplit("/", 1)[-1]
+            if total.isdigit():
+                return int(total)
+    length = _response_header(resp, "Content-Length")
+    if length is not None and str(length).isdigit():
+        size = int(length)
+        return start + size if status == 206 else size
+    return 0
+
+
+def _open_math_url(url: str, start: int, opener=None):
+    """Range 를 유지한 채 연다. 시험은 opener(request, timeout=) 를 넘긴다."""
+    import urllib.error
+    import urllib.request
+    headers = {"User-Agent": f"PinCapture/{APP_VERSION}"}
+    if start > 0:
+        headers["Range"] = f"bytes={start}-"
+    request = urllib.request.Request(url, headers=headers)
+    open_url = opener or urllib.request.urlopen
+    try:
+        return open_url(request, timeout=120)
+    except urllib.error.HTTPError:
+        raise
+    except Exception as exc:
+        raise MathInstallError(MATH_INSTALL_FAILED_MSG) from exc
+
+
+def fetch_math_pack(dest: Path, *, url: str | None = None, expected_sha: str | None = None,
+                    opener=None, progress=None, cancelled=None, chunk: int = 256 * 1024) -> None:
+    """구성 요소 zip 을 dest 에 받는다. 이어받기와 SHA-256 확인을 한다. 풀지는 않는다."""
+    import urllib.error
+    url = url or MATH_PACK_URL
+    expected = (expected_sha if expected_sha is not None else MATH_PACK_SHA256).lower()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if MATH_PACK_BYTES and dest.is_file():
+        size = dest.stat().st_size
+        if size == MATH_PACK_BYTES:
+            if _sha256_file(dest, cancelled, progress) == expected:
+                if progress:
+                    progress(size, size, "check")
+                return
+            dest.unlink()
+        elif size > MATH_PACK_BYTES:
+            dest.unlink()
+    start = dest.stat().st_size if dest.is_file() else 0
+    try:
+        resp = _open_math_url(url, start, opener)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 416 and dest.is_file() and _sha256_file(dest, cancelled, progress) == expected:
+            return
+        if exc.code == 416 and dest.is_file():
+            dest.unlink(missing_ok=True)
+        raise MathInstallError(MATH_INSTALL_FAILED_MSG) from exc
+    status = _response_status(resp)
+    if status == 200 and start:
+        dest.write_bytes(b"")
+        start = 0
+    elif status not in (200, 206):
+        close = getattr(resp, "close", None)
+        if close:
+            close()
+        raise MathInstallError(MATH_INSTALL_FAILED_MSG)
+    total = _payload_total(resp, status, start)
+    try:
+        with dest.open("ab" if start else "wb") as out:
+            done = start
+            while True:
+                if cancelled and cancelled():
+                    raise MathInstallCancelled()
+                block = resp.read(chunk)
+                if not block:
+                    break
+                out.write(block)
+                out.flush()
+                done += len(block)
+                if progress:
+                    progress(done, total, "download")
+    except MathInstallCancelled:
+        raise
+    except MathInstallError:
+        raise
+    except Exception as exc:
+        raise MathInstallError(MATH_INSTALL_FAILED_MSG) from exc
+    finally:
+        close = getattr(resp, "close", None)
+        if close:
+            close()
+    digest = _sha256_file(dest, cancelled, progress)
+    if digest != expected:
+        dest.unlink(missing_ok=True)
+        raise MathInstallError(MATH_INSTALL_HASH_MSG)
+
+
+def _safe_math_member(name: str) -> bool:
+    name = (name or "").replace("\\", "/").lstrip("/")
+    parts = [part for part in name.split("/") if part not in ("", ".")]
+    if not parts or ".." in parts:
+        return False
+    prefix = parts[0]
+    if prefix == "math":
+        return len(parts) >= 2
+    return prefix == "models" and len(parts) >= 3 and parts[1] == "formula"
+
+
+def _zip_member_sha256(archive, name: str) -> str:
+    import hashlib
+    digest = hashlib.sha256()
+    with archive.open(name) as handle:
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def extract_math_pack(zip_path: Path, *, onnx_sha: str | None = None, tok_sha: str | None = None) -> None:
+    """검증된 zip 을 ~/.pincapture 아래에 푼다. 경로 탈출은 받지 않는다."""
+    import shutil
+    import zipfile
+    expected_onnx = (onnx_sha if onnx_sha is not None else MATH_ONNX_SHA256).lower()
+    expected_tok = (tok_sha if tok_sha is not None else MATH_TOKENIZER_SHA256).lower()
+    with zipfile.ZipFile(zip_path) as archive:
+        names = [info.filename.replace("\\", "/") for info in archive.infolist()]
+        if MATH_PACK_ONNX not in names or MATH_PACK_TOKENIZER not in names:
+            raise MathInstallError(MATH_INSTALL_HASH_MSG)
+        if _zip_member_sha256(archive, MATH_PACK_ONNX) != expected_onnx:
+            raise MathInstallError(MATH_INSTALL_HASH_MSG)
+        if _zip_member_sha256(archive, MATH_PACK_TOKENIZER) != expected_tok:
+            raise MathInstallError(MATH_INSTALL_HASH_MSG)
+        root = CONFIG_DIR.resolve()
+        for info in archive.infolist():
+            name = info.filename.replace("\\", "/")
+            if name.endswith("/") or not _safe_math_member(name):
+                continue
+            target = (CONFIG_DIR / name).resolve()
+            if target != root and root not in target.parents:
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info) as src, target.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+    _math_cache.update(key=None, session=None, tokenizer=None)
+
+
+def install_math_pack(progress=None, cancelled=None, opener=None, url: str | None = None) -> None:
+    """받아 확인한 뒤 푼다. 끝나면 받은 zip 은 지운다. 설치를 누르기 전에는 호출하지 않는다."""
+    dest = _math_download_path()
+    fetch_math_pack(dest, url=url, opener=opener, progress=progress, cancelled=cancelled)
+    if cancelled and cancelled():
+        raise MathInstallCancelled()
+    if progress:
+        progress(1, 1, "extract")
+    extract_math_pack(dest)
+    dest.unlink(missing_ok=True)
+
+
+def math_component_present() -> bool:
+    """모델이나 실행 구성 요소 폴더가 있으면 True. 받지는 않는다."""
+    onnx, tok = math_model_files()
+    if onnx is not None or tok is not None:
+        return True
+    folder = CONFIG_DIR / "math"
+    if not folder.is_dir():
+        return False
+    try:
+        next(folder.iterdir())
+    except StopIteration:
+        return False
+    except OSError:
+        return False
+    return True
+
+
+def remove_math_component() -> None:
+    """받아 둔 수식 모델, 실행 구성 요소, 이어받기 파일을 지운다."""
+    import shutil
+    for rel in ("math", Path("models") / "formula", "downloads"):
+        target = CONFIG_DIR / rel
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+        elif target.exists():
+            target.unlink(missing_ok=True)
+    _math_cache.update(key=None, session=None, tokenizer=None)
+
+
+def build_math_install_box(parent=None) -> QMessageBox:
+    """설치 / 취소. exec 는 confirm_math_install 만 한다."""
+    box = QMessageBox(parent)
+    box.setWindowTitle(APP_NAME)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setText(MATH_INSTALL_TITLE)
+    install = box.addButton("설치", QMessageBox.ButtonRole.AcceptRole)
+    cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(install)
+    box._install_btn = install
+    box._cancel_btn = cancel
+    return box
+
+
+def confirm_math_install(parent=None) -> bool:
+    """설치를 누르면 True. 파일을 받지는 않는다."""
+    box = build_math_install_box(parent)
+    box.exec()
+    return box.clickedButton() is box._install_btn
+
+
+def confirm_math_remove(parent=None) -> bool:
+    box = QMessageBox(parent)
+    box.setWindowTitle(APP_NAME)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setText(MATH_REMOVE_MSG)
+    remove = box.addButton("제거", QMessageBox.ButtonRole.AcceptRole)
+    cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(cancel)
+    box.exec()
+    return box.clickedButton() is remove
+
+
+class _MathInstallThread(QThread):
+    progressed = Signal(int, int, str)
+    failed = Signal(str)
+    succeeded = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        try:
+            install_math_pack(
+                progress=lambda done, total, phase: self.progressed.emit(int(done), int(total), str(phase)),
+                cancelled=lambda: self._cancel,
+            )
+        except MathInstallCancelled:
+            self.failed.emit(MATH_INSTALL_CANCELLED_MSG)
+        except MathInstallError as exc:
+            self.failed.emit(exc.message)
+        except Exception:
+            self.failed.emit(MATH_INSTALL_FAILED_MSG)
+        else:
+            self.succeeded.emit()
+
+
+def _run_math_install_dialog(parent=None) -> None:
+    """진행 창을 띄우고 받는다. 취소·실패는 예외로 알린다."""
+    dialog = QProgressDialog("수식 기능을 받고 있어요.", "취소", 0, 0, parent)
+    dialog.setWindowTitle(APP_NAME)
+    dialog.setMinimumDuration(0)
+    dialog.setAutoClose(False)
+    dialog.setAutoReset(False)
+    dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+    worker = _MathInstallThread()
+    outcome = {"err": None}
+    finished = {"v": False}
+    loop = QEventLoop()
+
+    def on_progress(done: int, total: int, phase: str):
+        if phase == "check":
+            dialog.setLabelText("받은 파일을 확인하고 있어요.")
+        elif phase == "extract":
+            dialog.setLabelText("수식 기능을 준비하고 있어요.")
+        elif total > 0:
+            dialog.setMaximum(total)
+            dialog.setValue(min(done, total))
+            dialog.setLabelText(
+                f"수식 기능을 받고 있어요. ({done / 1048576:.0f} / {total / 1048576:.0f}MB)")
+        else:
+            dialog.setLabelText("수식 기능을 받고 있어요.")
+
+    def stop(err: str):
+        if finished["v"]:
+            return
+        finished["v"] = True
+        outcome["err"] = err
+        loop.quit()
+
+    dialog.canceled.connect(lambda: None if finished["v"] else worker.cancel())
+    worker.progressed.connect(on_progress)
+    worker.succeeded.connect(lambda: stop(""))
+    worker.failed.connect(stop)
+    worker.start()
+    dialog.show()
+    loop.exec()
+    dialog.close()
+    worker.wait(5000)
+    if outcome["err"]:
+        if outcome["err"] == MATH_INSTALL_CANCELLED_MSG:
+            raise MathInstallCancelled()
+        raise MathInstallError(outcome["err"])
+
+
+def ensure_math_installed(parent=None) -> tuple:
+    """이미 쓸 수 있으면 바로 True. 아니면 설치를 물어 보고, 눌렀을 때만 받는다.
+
+    반환은 (성공 여부, 안내 문장). 실패 안내 창은 여기서 띄운다.
+    """
+    if math_status() == "ok":
+        return True, ""
+    if not confirm_math_install(parent):
+        return False, MATH_INSTALL_CANCELLED_MSG
+    try:
+        _run_math_install_dialog(parent)
+    except MathInstallCancelled:
+        return False, MATH_INSTALL_CANCELLED_MSG
+    except MathInstallError as exc:
+        QMessageBox.warning(parent, APP_NAME, exc.message)
+        return False, exc.message
+    return True, ""
+
+
+def build_ocr_mode_menu(parent=None):
+    """글자 / 표 / 수식. 핀 메뉴와 메인 창 우클릭이 함께 쓴다."""
+    menu = QMenu(parent)
+    acts = {}
+    for mode, label in OCR_MODE_ACTIONS:
+        acts[mode] = menu.addAction(label)
+    return menu, acts
+
+
+def recognize_image(image: QImage, mode: str = "text") -> OcrResult:
+    """글자·표·수식을 읽는다. 글자와 표는 Windows.Media.Ocr, 수식은 로컬 모델.
+
+    모듈·언어 팩·수식 모델이 없으면 안내 문장을 돌려준다. 화면 보호를 우회하지 않는다.
+    이 함수는 파일을 받지 않는다. 받기는 사용자가 설치를 누른 뒤 ensure_math_installed 만 한다.
+    글자 모드는 하드 랩된 줄을 문단으로 잇는다.
+    """
     if image is None or (hasattr(image, "isNull") and image.isNull()):
         return OcrResult(False, "", "이미지가 없어요.")
+    mode = (mode or "text").strip().lower()
+    if mode == "math":
+        return _recognize_math(image)
     try:
         mods = _import_ocr_modules()
     except Exception as e:
@@ -1559,10 +2634,35 @@ def recognize_image(image: QImage) -> OcrResult:
         data, w, h = _rgba_bytes(prepared)
         bitmap = _bitmap_from_rgba(data, w, h, mods)
         result = _await_ocr(engine.recognize_async(bitmap))
-        text = (getattr(result, "text", "") or "").strip()
     except Exception as e:
         print(f"[ocr] 인식 실패: {e}")
         return OcrResult(False, "", OCR_FAILED_MSG)
+    raw = (getattr(result, "text", "") or "").strip()
+    try:
+        words = _words_from_ocr_result(result)
+    except Exception as e:
+        print(f"[ocr] 단어 상자 해석 실패: {e}")
+        words = []
+    if mode in ("table", "table-md"):
+        try:
+            grid = table_from_words(words) if words else []
+        except Exception as e:
+            print(f"[ocr] 표 맞추기 실패: {e}")
+            grid = []
+        if not grid:
+            return OcrResult(False, "", OCR_TABLE_EMPTY_MSG)
+        if mode == "table-md":
+            return OcrResult(True, grid_to_markdown(grid), OCR_TABLE_MD_MSG)
+        return OcrResult(True, grid_to_tsv(grid), OCR_TABLE_COPIED_MSG)
+    text = raw
+    if words:
+        try:
+            joined = reconstruct_paragraphs(words)
+        except Exception as e:
+            print(f"[ocr] 문단 맞추기 실패: {e}")
+            joined = ""
+        if joined:
+            text = joined
     if not text:
         return OcrResult(False, "", OCR_EMPTY_MSG)
     return OcrResult(True, text, OCR_COPIED_MSG)
@@ -2079,9 +3179,20 @@ class PinWindow(QWidget):
         self._toast = PinToast(text, self, msec)
         return self._toast
 
-    def copy_ocr(self) -> OcrResult:
+    def copy_ocr(self, mode: str = "text") -> OcrResult:
         # 형광펜·모자이크가 글자를 가리면 인식이 나빠져서, OCR 은 표시 없는 원본을 본다.
-        result = recognize_image(self.image_for_ocr())
+        # 글자 모드(기본)는 인자 없이 호출한다. 기존 시험의 가짜 copy_ocr 와 맞추기 위해서다.
+        image = self.image_for_ocr()
+        if mode == "math" and math_status() != "ok":
+            ok, note = ensure_math_installed(self)
+            if not ok:
+                if note == MATH_INSTALL_CANCELLED_MSG:
+                    self.show_toast(note, 4200)
+                return OcrResult(False, "", note)
+        if mode == "text":
+            result = recognize_image(image)
+        else:
+            result = recognize_image(image, mode)
         if result.ok and result.text:
             QApplication.clipboard().setText(result.text)
         self.show_toast(result.message, 1800 if result.ok else 4200)
@@ -2212,8 +3323,13 @@ class PinWindow(QWidget):
 
     def build_menu(self) -> "tuple[QMenu, dict]":
         m = QMenu(self)
+        ocr_menu, ocr_acts = build_ocr_mode_menu(self)
+        ocr_menu.setTitle("글자 복사")
+        m.addMenu(ocr_menu)
         acts = {
-            "ocr": m.addAction("글자 복사(OCR)"),
+            "ocr_menu": ocr_menu,
+            "ocr_modes": ocr_acts,
+            "ocr": ocr_acts["text"],
             "copy": m.addAction("클립보드에 복사"),
             "save": m.addAction("다른 이름으로 저장…"),
             "orig": m.addAction("원본 크기 (100%)"),
@@ -2242,8 +3358,16 @@ class PinWindow(QWidget):
     def apply_menu_action(self, chosen, acts: dict) -> None:
         if chosen is None:
             return
-        if chosen == acts["ocr"]:
-            self.copy_ocr()
+        ocr_mode = None
+        for mode, act in acts.get("ocr_modes", {}).items():
+            if chosen == act:
+                ocr_mode = mode
+                break
+        if ocr_mode is not None:
+            if ocr_mode == "text":
+                self.copy_ocr()
+            else:
+                self.copy_ocr(ocr_mode)
         elif chosen == acts["copy"]:
             QApplication.clipboard().setImage(self.image_for_export())
         elif chosen == acts["save"]:
@@ -2811,7 +3935,7 @@ class WelcomeDialog(QDialog):
         gv2 = QVBoxLayout(g2)
         gv2.addWidget(_muted(
             "· 드래그로 옮기고, 마우스 휠로 크기를 조절해요. Ctrl+휠은 투명도예요.\n"
-            "· 우클릭하면 글자 복사(OCR), 복사, 다른 이름으로 저장, 표시, 스포이트, 자, 투명도, 클릭 통과 메뉴가 나와요.\n"
+            "· 우클릭하면 글자 복사(글자·표·수식), 복사, 다른 이름으로 저장, 표시, 스포이트, 자, 투명도, 클릭 통과 메뉴가 나와요.\n"
             "· 표시 중에는 드래그로 그리고, Ctrl+Z로 실행 취소해요. Esc는 핀을 닫지 않고 표시만 끝내요.\n"
             "· 클릭 통과를 켜면 핀을 누를 수 없어요. 트레이의 클릭 통과 해제나 단축키로 꺼 주세요.\n"
             "· 더블클릭이나 Esc로 닫아요. 닫은 핀은 단축키로 다시 열 수 있어요.\n"
@@ -2975,6 +4099,17 @@ class SettingsDialog(QDialog):
         sc.addWidget(btn_desktop)
         sc.addWidget(btn_startup)
         left.addWidget(g_sc)
+
+        g_math = QGroupBox("수식")
+        math_lay = QVBoxLayout(g_math)
+        self.lbl_math = _muted("")
+        self.btn_math_remove = QPushButton("수식 기능 제거")
+        self.btn_math_remove.setToolTip("받아 둔 수식 모델과 실행 구성 요소를 지워요. 글자와 표는 그대로예요.")
+        self.btn_math_remove.clicked.connect(self._remove_math)
+        math_lay.addWidget(self.lbl_math)
+        math_lay.addWidget(self.btn_math_remove)
+        self._refresh_math_row()
+        left.addWidget(g_math)
         left.addStretch(1)
 
         g2 = QGroupBox("캡처할 때")
@@ -3059,6 +4194,23 @@ class SettingsDialog(QDialog):
         bb.accepted.connect(self._accept)
         bb.rejected.connect(self.reject)
         v.addWidget(bb)
+
+    def _refresh_math_row(self):
+        if math_component_present():
+            self.lbl_math.setText("수식 기능이 설치되어 있어요.")
+            self.btn_math_remove.setEnabled(True)
+        else:
+            self.lbl_math.setText("아직 설치하지 않았어요. 글자 복사에서 수식을 고르면 설치할 수 있어요.")
+            self.btn_math_remove.setEnabled(False)
+
+    def _remove_math(self):
+        if not math_component_present():
+            self._refresh_math_row()
+            return
+        if not confirm_math_remove(self):
+            return
+        remove_math_component()
+        self._refresh_math_row()
 
     def _browse(self):
         d = QFileDialog.getExistingDirectory(self, "저장할 폴더를 골라 주세요", self.ed_dir.text())
@@ -3310,7 +4462,10 @@ class MainToolbar(QWidget):
         self.btn_markup.clicked.connect(self._markup_current)
         self.btn_eyedropper.clicked.connect(lambda: self.start_inspect("eyedropper"))
         self.btn_ruler.clicked.connect(lambda: self.start_inspect("ruler"))
-        self.btn_ocr.clicked.connect(self._ocr_current)
+        # clicked 는 체크 여부(bool)를 넘긴다. 그대로 받으면 글자 모드가 아니게 된다.
+        self.btn_ocr.clicked.connect(lambda _checked=False: self._ocr_current())
+        self.btn_ocr.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.btn_ocr.customContextMenuRequested.connect(self._popup_ocr_menu)
         self.btn_reopen.clicked.connect(self.reopen_recent_pin)
         for b in (self.btn_markup, self.btn_eyedropper, self.btn_ruler, self.btn_ocr, self.btn_reopen):
             cap.addWidget(b, alignment=Qt.AlignmentFlag.AlignVCenter)
@@ -3440,7 +4595,8 @@ class MainToolbar(QWidget):
             ("markup", self.btn_markup, "핀에 그리기", "보관함에서 고른 캡처나 맨 앞 핀에 화살표·네모·형광펜·모자이크를 그려요."),
             ("eyedropper", self.btn_eyedropper, "스포이트", "화면 색을 찍어 HEX로 복사해요. RGB도 보여 줘요."),
             ("ruler", self.btn_ruler, "자", "두 점 사이의 픽셀 거리와 가로·세로를 재요."),
-            (None, self.btn_ocr, "글자 복사", "보관함에서 고른 캡처나 맨 앞 핀의 글자를 클립보드에 복사해요."),
+            (None, self.btn_ocr, "글자 복사",
+             "보관함에서 고른 캡처나 맨 앞 핀의 글자를 문단으로 맞춰 복사해요. 우클릭하면 글자, 표, 수식을 골라요."),
             ("reopen_pin", self.btn_reopen, "최근 핀", "가장 최근에 닫은 핀을 다시 열어요."),
         )
         empty = {
@@ -3497,13 +4653,42 @@ class MainToolbar(QWidget):
         pin.activateWindow()
         return pin
 
-    def _ocr_current(self):
+    def _popup_ocr_menu(self, pos):
+        """글자 복사 아이콘의 우클릭. 왼쪽 클릭은 예전처럼 글자 모드만 실행한다."""
+        if not self.btn_ocr.isEnabled():
+            return
+        menu, acts = build_ocr_mode_menu(self.btn_ocr)
+        chosen = menu.exec(self.btn_ocr.mapToGlobal(pos))
+        for mode, act in acts.items():
+            if chosen == act:
+                self._ocr_current(mode)
+                break
+        menu.deleteLater()
+
+    def _stop_math_until_installed(self):
+        """수식이 없으면 설치를 묻는다. 핀의 copy_ocr 가 다시 묻지 않게, 직접 인식할 때만 쓴다."""
+        if math_status() == "ok":
+            return None
+        ok, note = ensure_math_installed(self)
+        if ok:
+            return None
+        if note == MATH_INSTALL_CANCELLED_MSG:
+            self._show_notice(note, msec=4200)
+        return OcrResult(False, "", note)
+
+    def _ocr_current(self, mode: str = "text"):
         img = getattr(self, "_cur_img", None)
         if img is not None and not img.isNull():
             pin = self._pin_matching(img)
             if pin is not None:
-                return pin.copy_ocr()
-            result = recognize_image(img)
+                if mode == "text":
+                    return pin.copy_ocr()
+                return pin.copy_ocr(mode)
+            if mode == "math":
+                stopped = self._stop_math_until_installed()
+                if stopped is not None:
+                    return stopped
+            result = recognize_image(img) if mode == "text" else recognize_image(img, mode)
             if result.ok and result.text:
                 QApplication.clipboard().setText(result.text)
             self._show_notice(result.message, msec=1800 if result.ok else 4200)
@@ -3512,7 +4697,9 @@ class MainToolbar(QWidget):
         if pin is None:
             self._show_notice("글자를 읽을 캡처나 핀이 없어요.")
             return None
-        return pin.copy_ocr()
+        if mode == "text":
+            return pin.copy_ocr()
+        return pin.copy_ocr(mode)
 
     def _tray_menu(self) -> QMenu:
         """트레이 우클릭 메뉴. 캡처, 안내, 후원을 나눠 두었어요."""

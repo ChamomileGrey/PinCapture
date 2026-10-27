@@ -1,0 +1,11 @@
+# Developer-only formula runtime. NOT part of the base installer or requirements.txt.
+# End users do not use this file. They click 설치 in the app, which downloads
+# PinCapture-Math-<version>.zip. Do not add these packages to the PyInstaller build.
+#
+# A source checkout can install the same libraries for local experiments:
+#   py -3.13 -m pip install -r requirements-math.txt
+# onnxruntime is MIT, tokenizers is Apache-2.0, numpy is BSD-3-Clause, PyYAML is MIT.
+onnxruntime==1.23.2
+tokenizers==0.21.4
+numpy==2.2.6
+PyYAML==6.0.2

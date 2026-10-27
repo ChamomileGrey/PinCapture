@@ -14,3 +14,6 @@ winrt-Windows.Graphics.Imaging==3.2.1; sys_platform == "win32"
 winrt-Windows.Media.Ocr==3.2.1; sys_platform == "win32"
 winrt-Windows.Storage.Streams==3.2.1; sys_platform == "win32"
 typing_extensions==4.15.0; sys_platform == "win32"
+
+# Formula-to-LaTeX is optional and is NOT installed with the app.
+# See requirements-math.txt and installer/docs/사용법.txt. Do not add those packages here.
