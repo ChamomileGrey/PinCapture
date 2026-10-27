@@ -2,6 +2,8 @@
 # Created: 2026-10-27 by Grok 4.7 via Cursor
 # Changelog:
 #   v0.10.0 2026-10-27 Grok 4.7 — deterministic zip of the formula model and Windows runtime
+#   v0.10.0 2026-10-27 Grok 4.7 — sort members by case-sensitive path parts (Windows Path
+#                                 order is case-insensitive and changes the zip hash)
 """
 Build PinCapture-Math-<version>.zip for the GitHub release asset.
 
@@ -152,18 +154,43 @@ def stage_tree(constants: dict) -> None:
     (math_dir / "THIRD_PARTY_NOTICES.txt").write_text(NOTICE, encoding="utf-8", newline="\n")
 
 
-def write_zip(version: str) -> Path:
-    OUT.mkdir(parents=True, exist_ok=True)
-    dest = OUT / f"PinCapture-Math-{version}.zip"
-    files = sorted(path for path in STAGE.rglob("*") if path.is_file())
+def pack_sort_key(relative: str) -> tuple:
+    """Case-sensitive path parts.
+
+    pathlib.Path ordering lowercases on Windows, so the same tree is zipped in
+    a different order there. The archive size stays the same and the SHA-256
+    does not. A raw string sort is also wrong: '/' sorts after '-', so
+    'numpy-…' would land before 'numpy/'.
+    """
+    return tuple(part for part in relative.replace("\\", "/").split("/") if part)
+
+
+def iter_pack_files(stage: Path):
+    files = [path for path in stage.rglob("*") if path.is_file()]
+    files.sort(key=lambda path: pack_sort_key(path.relative_to(stage).as_posix()))
+    return files
+
+
+def write_deterministic_zip(stage: Path, dest: Path) -> None:
+    """Zip stage with fixed timestamps, mode, level, and member order."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-        for path in files:
-            arcname = path.relative_to(STAGE).as_posix()
+        for path in iter_pack_files(stage):
+            arcname = path.relative_to(stage).as_posix()
             info = zipfile.ZipInfo(arcname, date_time=(2026, 1, 1, 0, 0, 0))
             info.compress_type = zipfile.ZIP_DEFLATED
+            # ZipInfo does not inherit ZipFile.compresslevel. None means
+            # zlib's default (-1), which is level 6 today but is not a promise.
+            info._compresslevel = 6
             info.create_system = 3
             info.external_attr = 0o644 << 16
             archive.writestr(info, path.read_bytes())
+
+
+def write_zip(version: str) -> Path:
+    OUT.mkdir(parents=True, exist_ok=True)
+    dest = OUT / f"PinCapture-Math-{version}.zip"
+    write_deterministic_zip(STAGE, dest)
     return dest
 
 
