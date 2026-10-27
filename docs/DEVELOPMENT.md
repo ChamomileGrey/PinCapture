@@ -38,6 +38,8 @@ pyw -3.13 pincapture.py         # 콘솔 없이. 오류는 로그와 메시지 �
 
 수동 시험용 환경 변수 `PINCAP_TEST_RESTART`, `PINCAP_TEST_AUTOEXIT`는 `docs/ARCHITECTURE.md` 19절에 있어요.
 
+수식(LaTeX)은 선택입니다. `requirements-math.txt`를 `requirements.txt`나 설치 파일에 넣지 않아요. `installer/PinCapture.spec`이 `onnxruntime`, `tokenizers`, `yaml`, `numpy`를 빼고, `build.py`의 묶음 검사가 경로에 `onnxruntime`, `tokenizers`, `pp_formulanet`, `pix2tex`가 있으면 빌드를 멈춰요. 소스에서는 `py -3.13 -m pip install -r requirements-math.txt`이고, 모델 파일은 `~/.pincapture/models/formula`에 직접 둬요. 주소와 SHA-256은 `installer/docs/사용법.txt`에 있어요. 폴더를 바꾸려면 `PINCAPTURE_MATH_DIR`를 써요. 설치판 EXE는 자기 폴더에 pip 설치가 안 되니, Python 3.13으로 `-t "%USERPROFILE%\.pincapture\math"`에 받아요.
+
 ## 2. Python 선택 함정
 
 PC에 Python이 여러 개 있으면(python.org 3.13·3.12, Microsoft Store판, Miniconda 등) `python`이나 `py`가 가리키는 Python이 설치·업데이트 뒤에 바뀔 수 있어요. 그러면 PySide6가 없는 Python으로 실행돼요.

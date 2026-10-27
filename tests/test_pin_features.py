@@ -141,7 +141,9 @@ def test_pin_menu_ocr_copies_text_and_toasts(pc, toolbar, monkeypatch):
         lambda img: pc.OcrResult(True, "가나다", pc.OCR_COPIED_MSG))
     pin = toolbar._make_pin(_img(40, 24, "white"), None)
     menu, acts = pin.build_menu()
-    assert acts["ocr"].text() == "글자 복사(OCR)"
+    assert acts["ocr_menu"].title() == "글자 복사"
+    assert [acts["ocr_modes"][mode].text() for mode, _label in pc.OCR_MODE_ACTIONS] == [
+        label for _mode, label in pc.OCR_MODE_ACTIONS]
     assert [acts["opacity"][p].text() for p in (100, 80, 60, 40)] == ["100%", "80%", "60%", "40%"]
     assert acts["click"].text() == "클릭 통과"
     QApplication.clipboard().clear()

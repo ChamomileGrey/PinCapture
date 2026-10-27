@@ -4,7 +4,7 @@
 
 ![핀캡처 메인 창: 위쪽 캡처 버튼, 가운데 방금 캡처, 오른쪽 이전 캡처 목록](docs/images/screenshot-main.png)
 
-- 현재 버전: **0.9.1** (`pincapture.py`의 `APP_VERSION`)
+- 현재 버전: **0.10.0** (`pincapture.py`의 `APP_VERSION`)
 - 만든 이: **캐모마일그레이 (ChamomileGrey)**
 - 대상: Windows 10 / 11, 64비트(x64)
 - 계정·광고 없음. 앱은 네트워크에 연결하지 않고, 후원하기를 누를 때만 기본 브라우저를 엽니다.
@@ -25,7 +25,7 @@
 
 - **자동 저장 + 클립보드**: 캡처하면 `캡처_YYYYMMDD_HHMMSS.png`(또는 `.jpg`)로 저장되고 클립보드에도 복사됩니다. 핀 캡처는 기본적으로 클립보드에만 복사됩니다.
 - **보관함**: 방금 캡처는 크게 보여 주고, 이전 캡처는 오른쪽 목록에 쌓입니다. 저장 폴더에 있던 기존 캡처도 불러옵니다. `Ctrl`/`Shift`+클릭, 드래그, `Ctrl+A`로 여러 개를 골라 한 번에 복사·저장·핀 고정·목록에서 제거할 수 있습니다(파일은 지우지 않음).
-- **핀**: 드래그로 이동, 마우스 휠로 크기 조절, Ctrl+휠 또는 우클릭으로 투명도(100/80/60/40%), 우클릭 메뉴(글자 복사(OCR)·복사·저장·원래 크기·표시·스포이트·자·클릭 통과), 더블클릭이나 `Esc`로 닫기. 클릭 통과를 켜면 트레이 메뉴나 `Ctrl+Alt+X`로 끕니다. 글자 복사는 Windows OCR을 쓰며, 언어 팩이 없으면 설치 방법을 안내합니다.
+- **핀**: 드래그로 이동, 마우스 휠로 크기 조절, Ctrl+휠 또는 우클릭으로 투명도(100/80/60/40%), 우클릭 메뉴(글자 복사·복사·저장·원래 크기·표시·스포이트·자·클릭 통과), 더블클릭이나 `Esc`로 닫기. 클릭 통과를 켜면 트레이 메뉴나 `Ctrl+Alt+X`로 끕니다. 글자 복사는 Windows OCR로 문단을 맞추고, 표는 엑셀(TSV)이나 Markdown으로 복사합니다. 수식(LaTeX)은 약 233MB 모델을 직접 넣었을 때만 동작하고, 없으면 안내만 합니다. 앱은 그 모델을 받아 오지 않습니다.
 - **표시**: 핀 우클릭의 **표시** 또는 `Ctrl+Alt+M`으로 화살표, 네모, 형광펜, 모자이크를 그립니다. 색·두께는 핀 옆 작은 도구에서 고르고, `Ctrl+Z` / `Ctrl+Y`로 취소·복구합니다. 그리는 동안 핀은 드래그로 움직이지 않고, `Esc`는 핀을 닫지 않습니다. 복사·저장 이미지에는 표시가 들어가고, OCR은 원본을 읽습니다.
 - **스포이트·자**: 화면을 멈춘 뒤 동작합니다. 스포이트는 클릭한 색의 HEX를 복사하고, 자는 같은 모니터의 두 점을 물리 픽셀로 잽니다. 캡처가 막혀 있으면 검은 화면을 덮지 않고 안내만 합니다.
 - **트레이 상주**: 창을 닫아도 트레이에 남아 단축키가 계속 동작합니다. 중복 실행하면 새로 뜨지 않고 기존 창이 앞으로 옵니다.
@@ -67,7 +67,7 @@
 받은 파일이 올라온 파일과 같은지 확인하려면 Releases에 함께 올라온 `PinCapture-Setup-<버전>.sha256.txt`의 값과 비교합니다.
 
 ```powershell
-Get-FileHash .\PinCapture-Setup-0.9.1.exe -Algorithm SHA256
+Get-FileHash .\PinCapture-Setup-0.10.0.exe -Algorithm SHA256
 ```
 
 - **업데이트**: 새 설치 파일을 실행하면 됩니다. 실행 중인 핀캡처는 자동으로 닫히고 설정은 유지됩니다. 이때 화면의 핀과 파일로 저장하지 않은 캡처는 사라집니다.
@@ -75,7 +75,7 @@ Get-FileHash .\PinCapture-Setup-0.9.1.exe -Algorithm SHA256
 
 ## 사용법 요약
 
-- 단축키를 누르거나 핀캡처 창 위쪽의 **영역 지정 / 창 캡처 / 전체 화면 / 핀 고정** 버튼을 누릅니다. 그 오른쪽 아이콘은 **핀에 그리기**, **스포이트**, **자**, **글자 복사**, **최근 핀**입니다. 이름과 단축키는 아이콘에 마우스를 올리면 나옵니다.
+- 단축키를 누르거나 핀캡처 창 위쪽의 **영역 지정 / 창 캡처 / 전체 화면 / 핀 고정** 버튼을 누릅니다. 그 오른쪽 아이콘은 **핀에 그리기**, **스포이트**, **자**, **글자 복사**, **최근 핀**입니다. 이름과 단축키는 아이콘에 마우스를 올리면 나옵니다. 글자 복사 아이콘의 왼쪽 클릭은 글자이고, 우클릭에서 글자·표·수식을 고릅니다.
 - 캡처하면 핀캡처 창이 열리고 방금 캡처가 크게 보입니다(설정에서 끌 수 있음).
 - 창의 `×`는 트레이로 숨기기입니다. 완전히 끄려면 트레이 아이콘 우클릭 → **종료**.
 - 저장 폴더(기본: `사진\PinCapture`), 파일 형식(png/jpg), 파일 이름 앞부분, 단축키는 **설정**에서 바꿉니다.
@@ -97,6 +97,8 @@ Get-FileHash .\PinCapture-Setup-0.9.1.exe -Algorithm SHA256
 | `~/.pincapture/pincapture.log` | 실행 기록: 시작 시각, 버전, 실행 파일 경로, 명령줄 인수, 오류. 512KB를 넘으면 `pincapture.log.old`로 바뀝니다. | 실행할 때마다 |
 | `~/.pincapture/clipboard/` | 여러 캡처를 한 번에 복사할 때 쓰는 임시 PNG | 여러 개 복사할 때 |
 | `%TEMP%\pincapture-recent-pins\` | 닫은 핀을 다시 열기 위한 임시 PNG(기본 최근 10개) | 핀을 닫을 때 |
+| `~/.pincapture/models/formula/` | 수식(LaTeX)용 ONNX와 토크나이저. 앱이 받아 오지 않고, 직접 넣었을 때만 있습니다. | 수식을 쓰려고 파일을 넣었을 때 |
+| `~/.pincapture/math/` | 수식 실행 구성 요소(ONNX Runtime 등). 설치 파일에는 없고, 직접 설치했을 때만 있습니다. | 수식을 쓰려고 설치했을 때 |
 | `~/.pincapture/pincapture.ico` | 바로가기 아이콘 | 소스 실행에서 바로가기를 만들 때만 |
 | 시작 메뉴·바탕화면·시작 프로그램 바로가기 | `핀캡처.lnk` | 설치할 때 고른 항목, 또는 설정의 바로가기 버튼 |
 
@@ -172,13 +174,14 @@ Get-FileHash .\PinCapture-Setup-0.9.1.exe -Algorithm SHA256
 
 **핀캡처 자체 코드는 All rights reserved입니다.** 누구나 개인적·상업적 목적으로 무료로 쓸 수 있지만, 코드의 재배포·수정·판매는 허락 없이 할 수 없습니다. 자세한 조건은 [LICENSE](LICENSE)를 보세요. 이 저장소의 공개는 코드 열람을 위한 것이며 오픈소스 라이선스를 부여하지 않습니다.
 
-설치 파일에 포함된 오픈소스 구성 요소(Qt / PySide6, pynput, six, PyWinRT, Python 런타임 등)의 고지와 라이선스 전문은 [installer/docs/THIRD_PARTY_NOTICES.txt](installer/docs/THIRD_PARTY_NOTICES.txt)와 [installer/docs/licenses/](installer/docs/licenses/)에 있습니다. PySide6와 pynput은 LGPL-3.0이며, 설치본에서 별도 파일로 들어 있어 사용자가 교체할 수 있습니다. 글자 복사에 쓰는 PyWinRT는 MIT입니다.
+설치 파일에 포함된 오픈소스 구성 요소(Qt / PySide6, pynput, six, PyWinRT, Python 런타임 등)의 고지와 라이선스 전문은 [installer/docs/THIRD_PARTY_NOTICES.txt](installer/docs/THIRD_PARTY_NOTICES.txt)와 [installer/docs/licenses/](installer/docs/licenses/)에 있습니다. PySide6와 pynput은 LGPL-3.0이며, 설치본에서 별도 파일로 들어 있어 사용자가 교체할 수 있습니다. 글자 복사에 쓰는 PyWinRT는 MIT입니다. 수식 모드는 선택입니다. 모델(PaddlePaddle PP-FormulaNet_plus-S, Apache-2.0)과 런타임(ONNX Runtime MIT, tokenizers Apache-2.0, NumPy BSD-3-Clause, PyYAML MIT)은 기본 설치 파일에 들어 있지 않습니다. pix2tex 가중치(CC BY-NC-SA)는 쓰지 않습니다.
 
 ## 크레딧
 
 - [Qt for Python (PySide6)](https://doc.qt.io/qtforpython-6/) — 화면 표시와 캡처 (LGPL-3.0)
 - [pynput](https://github.com/moses-palmer/pynput) — 전역 단축키 (LGPL-3.0)
 - [PyWinRT](https://github.com/pywinrt/pywinrt) — Windows OCR (MIT)
+- [PP-FormulaNet_plus-S](https://huggingface.co/PaddlePaddle/PP-FormulaNet_plus-S) — 선택 수식 모델 (Apache-2.0, 기본 설치에 없음)
 - [PyInstaller](https://pyinstaller.org/), [Inno Setup](https://jrsoftware.org/isinfo.php) — 설치 파일 빌드
 - 코드는 Claude(claude.ai, Claude Code)와 Grok과 함께 작성했습니다. 버전별 기록은 `pincapture.py` 맨 위 주석에 있습니다.
 - 캐모마일그레이 (ChamomileGrey)

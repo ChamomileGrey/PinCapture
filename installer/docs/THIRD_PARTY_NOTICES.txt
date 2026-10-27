@@ -81,5 +81,47 @@ This program uses the following open-source software. Full license texts are in 
    Source  : https://github.com/python/typing_extensions
 
 
+8. Optional formula-to-LaTeX pieces  (NOT included in the installer)
+   수식 mode can turn a captured formula into LaTeX. The S model file is 233,421,946 bytes (about 233 MB), so the
+   base installer does not ship it, and the app never downloads it. Text and table copy
+   work without these files. If you add them yourself, these notices apply.
+
+   PP-FormulaNet_plus-S  (PaddlePaddle)
+   License : Apache License 2.0  — licenses\Apache-2.0.txt
+   Copyright (c) PaddlePaddle Authors. All rights reserved.
+   Source  : https://huggingface.co/PaddlePaddle/PP-FormulaNet_plus-S
+   The ONNX file this guide names (pp_formulanet_plus_s.onnx) is the Apache-2.0
+   conversion published with RapidAI RapidDoc:
+   https://www.modelscope.cn/models/RapidAI/RapidDoc
+   PinCapture does not bundle RapidDoc or PaddleX. The image preprocess lives in pincapture.py.
+
+   pix2tex / LaTeX-OCR weights are NOT used. Those weights are CC BY-NC-SA and are not
+   a permissive license. Do not add them to this app.
+
+   If you install the optional runtime (requirements-math.txt, or pip -t into
+   %USERPROFILE%\.pincapture\math), these libraries stay outside the installer:
+
+   ONNX Runtime 1.23.2
+   License : MIT  — licenses\ONNXRuntime-MIT.txt
+   Copyright (c) Microsoft Corporation.
+   Source  : https://github.com/microsoft/onnxruntime
+
+   Hugging Face tokenizers 0.21.4
+   License : Apache License 2.0  — licenses\Apache-2.0.txt
+   Copyright 2019 The HuggingFace Team.
+   Source  : https://github.com/huggingface/tokenizers
+
+   NumPy 2.2.6
+   License : BSD 3-Clause  — licenses\NumPy-BSD-3-Clause.txt
+   Copyright (c) 2005-2024, NumPy Developers.
+   Source  : https://numpy.org/
+
+   PyYAML 6.0.2
+   License : MIT  — licenses\PyYAML-MIT.txt
+   Copyright (c) 2017-2021 Ingy döt Net
+   Copyright (c) 2006-2016 Kirill Simonov
+   Source  : https://github.com/yaml/pyyaml
+
+
 Nothing in the license terms of 핀캡처 restricts modification of the above libraries for your
 own use or reverse engineering for debugging such modifications.

@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-# PinCapture PyInstaller spec (onedir), app version 0.7.0.
+# PinCapture PyInstaller spec (onedir), app version 0.10.0.
 # The version number itself is APP_VERSION in pincapture.py; build.py reads it.
 # Called by installer/build.py.
 # Manual build: py -3.13 -m PyInstaller --noconfirm --distpath build/dist --workpath build/work PinCapture.spec
@@ -40,7 +40,12 @@ a = Analysis(
     binaries=_binaries,
     datas=_datas,
     hiddenimports=_hidden,
-    excludes=["tkinter", "unittest", "pydoc", "pdb", "doctest", "lib2to3", "xmlrpc"],
+    # Formula-to-LaTeX is optional (requirements-math.txt). These must not enter the
+    # base installer even when the build machine has them installed. pix2tex weights
+    # are CC BY-NC-SA and are not used.
+    excludes=["tkinter", "unittest", "pydoc", "pdb", "doctest", "lib2to3", "xmlrpc",
+              "onnxruntime", "tokenizers", "yaml", "numpy", "cv2",
+              "torch", "torchvision", "pix2tex", "ftfy", "PIL"],
     # LGPL: ship pynput as plain .py files under _internal/pynput so a user can replace it.
     # (PySide6/Qt are already separate DLL/pyd files under _internal/PySide6.)
     module_collection_mode={"pynput": "py"},
