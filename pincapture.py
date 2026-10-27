@@ -28,7 +28,7 @@
 #   v0.9.1 2026-10-26  Grok (Grok 4.7) — 메인 창 상단을 압축하고, 표시·스포이트·자·글자 복사·
 #                      최근 핀을 캡처 줄 오른쪽의 작은 아이콘으로 배치
 #   v0.10.0 2026-10-27 Grok (Grok 4.7) — 글자 복사에 문단 맞추기, 표(TSV·Markdown), 수식(LaTeX).
-#                      수식 모델은 기본 설치에 넣지 않고, 없으면 안내만 한다
+#                      수식은 기본 설치에 넣지 않고, 설치를 눌렀을 때만 받는다
 #   Created: 2026-08-04 by Claude via claude.ai / Modified: 2026-10-27 by Grok 4.7 via Cursor
 #   빌드: installer/build.py  (PyInstaller onedir + Inno Setup → PinCapture-Setup-<버전>.exe)
 """
@@ -270,8 +270,8 @@ except ImportError as _e:
     _handle_missing_deps(_e)
     raise
 from PySide6.QtCore import (
-    Qt, QItemSelectionModel, QMimeData, QObject, QPoint, QPointF, QRect, QSize,
-    QStandardPaths, QTimer, QUrl, Signal,
+    Qt, QEventLoop, QItemSelectionModel, QMimeData, QObject, QPoint, QPointF, QRect, QSize,
+    QStandardPaths, QThread, QTimer, QUrl, Signal,
 )
 from PySide6.QtGui import (
     QBrush, QColor, QCursor, QDesktopServices, QFont, QFontDatabase, QGuiApplication, QIcon,
@@ -283,7 +283,7 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListView,
     QGridLayout, QListWidget, QListWidgetItem, QMenu, QMessageBox, QPushButton, QSpinBox,
-    QSplitter, QSystemTrayIcon, QToolButton, QVBoxLayout, QWidget,
+    QSplitter, QSystemTrayIcon, QToolButton, QVBoxLayout, QWidget, QProgressDialog,
 )
 
 def _singleton_name() -> str:
@@ -1359,16 +1359,37 @@ OCR_TABLE_COPIED_MSG = "표를 복사했어요. 엑셀에 붙여 넣으면 칸�
 OCR_TABLE_MD_MSG = "표를 Markdown으로 복사했어요."
 OCR_TABLE_EMPTY_MSG = "표로 읽을 칸을 찾지 못했어요."
 MATH_MISSING_MSG = (
-    "수식 모델을 찾지 못했어요.\n"
-    "수식 변환은 용량이 커서 기본 설치에 들어 있지 않아요. "
-    "사용법의 '수식' 항목대로 모델 파일을 넣어 주세요.\n"
-    "앱은 모델을 인터넷에서 받아 오지 않아요."
-)
-MATH_RUNTIME_MSG = (
-    "수식 모델은 찾았지만, 실행에 필요한 구성 요소가 없어요.\n"
-    "사용법의 '수식' 항목대로 구성 요소를 설치한 뒤 다시 시도해 주세요.\n"
+    "수식 기능이 아직 없어요.\n"
+    "글자 복사의 수식을 고르면 설치할 수 있어요. "
+    "설치를 누르기 전에는 파일을 받지 않아요.\n"
     "글자와 표 복사는 그대로 쓸 수 있어요."
 )
+MATH_RUNTIME_MSG = (
+    "수식 파일을 찾았지만 실행할 수 없어요.\n"
+    "글자 복사의 수식을 다시 고르면 구성 요소를 받을 수 있어요.\n"
+    "글자와 표 복사는 그대로 쓸 수 있어요."
+)
+# 설치 확인 창의 본문. 버튼은 설치 / 취소.
+MATH_INSTALL_TITLE = "수식 기능 설치 (약 214MB 다운로드)"
+MATH_INSTALL_CANCELLED_MSG = "수식 기능 설치를 취소했어요."
+MATH_INSTALL_FAILED_MSG = (
+    "수식 기능을 받지 못했어요. 인터넷 연결을 확인한 뒤 다시 시도해 주세요."
+)
+MATH_INSTALL_HASH_MSG = "받은 파일이 손상됐어요. 다시 시도해 주세요."
+MATH_REMOVE_MSG = "받아 둔 수식 파일을 지울까요?"
+# 릴리스에 붙는 선택 구성 요소. 기본 설치 파일에는 없다.
+# 해시와 크기는 installer/build_math_pack.py 가 만든 zip 과 같아야 한다.
+MATH_PACK_NAME = f"PinCapture-Math-{APP_VERSION}.zip"
+MATH_PACK_URL = (
+    "https://github.com/ChamomileGrey/PinCapture/releases/download/"
+    f"v{APP_VERSION}/{MATH_PACK_NAME}"
+)
+MATH_PACK_SHA256 = "26f920415c1e2d933cb5b1c2d9f84fa5fb9ca2125f35645f779df4a4bc28db2c"
+MATH_PACK_BYTES = 213922566
+MATH_ONNX_SHA256 = "30998d10c94ccff1ad8981df0c71048cb1f3eec7b1e515b809767f1f72aebe3b"
+MATH_TOKENIZER_SHA256 = "96062655d94c21d39274328dbc82c1a487e66addb8425f5a7fd5b7dfb2421ec3"
+MATH_PACK_ONNX = "models/formula/pp_formulanet_plus_s.onnx"
+MATH_PACK_TOKENIZER = "models/formula/inference.yml"
 MATH_FAILED_MSG = "수식을 읽지 못했어요. 수식만 보이게 다시 찍어 주세요."
 MATH_EMPTY_MSG = "이미지에서 수식을 찾지 못했어요."
 MATH_COPIED_MSG = "수식을 LaTeX로 복사했어요."
@@ -1914,7 +1935,7 @@ def _words_from_ocr_result(result) -> list:
 
 
 def _math_search_dirs() -> list:
-    """수식 모델 파일을 찾을 폴더. 앱은 이 폴더를 만들어 받거나 네트워크로 받지 않는다."""
+    """수식 모델 파일을 찾을 폴더. 받기 자체는 설치를 누른 뒤 install_math_pack 만 한다."""
     dirs = []
     env = os.environ.get("PINCAPTURE_MATH_DIR", "").strip()
     if env:
@@ -1989,10 +2010,20 @@ def _prepare_math_imports() -> None:
         path = str(folder)
         if path not in sys.path:
             sys.path.insert(0, path)
-        capi = pkg / "capi"
-        if IS_WINDOWS and capi.is_dir() and hasattr(os, "add_dll_directory"):
+        if not (IS_WINDOWS and hasattr(os, "add_dll_directory")):
+            continue
+        dll_dirs = [pkg / "capi"]
+        try:
+            for sub in folder.iterdir():
+                if sub.is_dir() and sub.name.endswith(".libs"):
+                    dll_dirs.append(sub)
+        except OSError:
+            pass
+        for dll_dir in dll_dirs:
+            if not dll_dir.is_dir():
+                continue
             try:
-                os.add_dll_directory(str(capi))
+                os.add_dll_directory(str(dll_dir))
             except Exception:
                 pass
 
@@ -2147,7 +2178,7 @@ def _tidy_latex(text: str) -> str:
 
 
 def predict_latex(image: QImage) -> str:
-    """로컬 ONNX 모델로 수식 이미지를 LaTeX 로 바꾼다. 네트워크를 쓰지 않는다."""
+    """로컬 ONNX 모델로 수식 이미지를 LaTeX 로 바꾼다. 여기서는 네트워크를 쓰지 않는다."""
     np = _load_module("num" + "py")
     session, tokenizer = _math_engine()
     size = _math_cache.get("canvas") or _MATH_CANVAS
@@ -2192,6 +2223,379 @@ def _recognize_math(image: QImage) -> OcrResult:
     return OcrResult(True, latex, MATH_COPIED_MSG)
 
 
+class MathInstallError(Exception):
+    """수식 설치 실패. message 는 사용자에게 보여줄 한국어 문장."""
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
+
+
+class MathInstallCancelled(MathInstallError):
+    def __init__(self):
+        super().__init__(MATH_INSTALL_CANCELLED_MSG)
+
+
+def _math_download_path() -> Path:
+    return CONFIG_DIR / "downloads" / (MATH_PACK_NAME + ".partial")
+
+
+def _sha256_file(path: Path, cancelled=None, progress=None) -> str:
+    import hashlib
+    digest = hashlib.sha256()
+    done = 0
+    total = path.stat().st_size
+    with path.open("rb") as handle:
+        while True:
+            if cancelled and cancelled():
+                raise MathInstallCancelled()
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+            done += len(block)
+            if progress:
+                progress(done, total, "check")
+    return digest.hexdigest()
+
+
+def _response_header(resp, name: str):
+    headers = getattr(resp, "headers", None)
+    if headers is None:
+        return None
+    getter = getattr(headers, "get", None)
+    if getter is None:
+        return None
+    return getter(name) or getter(name.lower())
+
+
+def _response_status(resp) -> int:
+    status = getattr(resp, "status", None)
+    if status:
+        return int(status)
+    getcode = getattr(resp, "getcode", None)
+    if getcode:
+        return int(getcode())
+    return 0
+
+
+def _payload_total(resp, status: int, start: int) -> int:
+    if status == 206:
+        content_range = str(_response_header(resp, "Content-Range") or "")
+        if "/" in content_range:
+            total = content_range.rsplit("/", 1)[-1]
+            if total.isdigit():
+                return int(total)
+    length = _response_header(resp, "Content-Length")
+    if length is not None and str(length).isdigit():
+        size = int(length)
+        return start + size if status == 206 else size
+    return 0
+
+
+def _open_math_url(url: str, start: int, opener=None):
+    """Range 를 유지한 채 연다. 시험은 opener(request, timeout=) 를 넘긴다."""
+    import urllib.error
+    import urllib.request
+    headers = {"User-Agent": f"PinCapture/{APP_VERSION}"}
+    if start > 0:
+        headers["Range"] = f"bytes={start}-"
+    request = urllib.request.Request(url, headers=headers)
+    open_url = opener or urllib.request.urlopen
+    try:
+        return open_url(request, timeout=120)
+    except urllib.error.HTTPError:
+        raise
+    except Exception as exc:
+        raise MathInstallError(MATH_INSTALL_FAILED_MSG) from exc
+
+
+def fetch_math_pack(dest: Path, *, url: str | None = None, expected_sha: str | None = None,
+                    opener=None, progress=None, cancelled=None, chunk: int = 256 * 1024) -> None:
+    """구성 요소 zip 을 dest 에 받는다. 이어받기와 SHA-256 확인을 한다. 풀지는 않는다."""
+    import urllib.error
+    url = url or MATH_PACK_URL
+    expected = (expected_sha if expected_sha is not None else MATH_PACK_SHA256).lower()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if MATH_PACK_BYTES and dest.is_file():
+        size = dest.stat().st_size
+        if size == MATH_PACK_BYTES:
+            if _sha256_file(dest, cancelled, progress) == expected:
+                if progress:
+                    progress(size, size, "check")
+                return
+            dest.unlink()
+        elif size > MATH_PACK_BYTES:
+            dest.unlink()
+    start = dest.stat().st_size if dest.is_file() else 0
+    try:
+        resp = _open_math_url(url, start, opener)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 416 and dest.is_file() and _sha256_file(dest, cancelled, progress) == expected:
+            return
+        if exc.code == 416 and dest.is_file():
+            dest.unlink(missing_ok=True)
+        raise MathInstallError(MATH_INSTALL_FAILED_MSG) from exc
+    status = _response_status(resp)
+    if status == 200 and start:
+        dest.write_bytes(b"")
+        start = 0
+    elif status not in (200, 206):
+        close = getattr(resp, "close", None)
+        if close:
+            close()
+        raise MathInstallError(MATH_INSTALL_FAILED_MSG)
+    total = _payload_total(resp, status, start)
+    try:
+        with dest.open("ab" if start else "wb") as out:
+            done = start
+            while True:
+                if cancelled and cancelled():
+                    raise MathInstallCancelled()
+                block = resp.read(chunk)
+                if not block:
+                    break
+                out.write(block)
+                out.flush()
+                done += len(block)
+                if progress:
+                    progress(done, total, "download")
+    except MathInstallCancelled:
+        raise
+    except MathInstallError:
+        raise
+    except Exception as exc:
+        raise MathInstallError(MATH_INSTALL_FAILED_MSG) from exc
+    finally:
+        close = getattr(resp, "close", None)
+        if close:
+            close()
+    digest = _sha256_file(dest, cancelled, progress)
+    if digest != expected:
+        dest.unlink(missing_ok=True)
+        raise MathInstallError(MATH_INSTALL_HASH_MSG)
+
+
+def _safe_math_member(name: str) -> bool:
+    name = (name or "").replace("\\", "/").lstrip("/")
+    parts = [part for part in name.split("/") if part not in ("", ".")]
+    if not parts or ".." in parts:
+        return False
+    prefix = parts[0]
+    if prefix == "math":
+        return len(parts) >= 2
+    return prefix == "models" and len(parts) >= 3 and parts[1] == "formula"
+
+
+def _zip_member_sha256(archive, name: str) -> str:
+    import hashlib
+    digest = hashlib.sha256()
+    with archive.open(name) as handle:
+        while True:
+            block = handle.read(1024 * 1024)
+            if not block:
+                break
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def extract_math_pack(zip_path: Path, *, onnx_sha: str | None = None, tok_sha: str | None = None) -> None:
+    """검증된 zip 을 ~/.pincapture 아래에 푼다. 경로 탈출은 받지 않는다."""
+    import shutil
+    import zipfile
+    expected_onnx = (onnx_sha if onnx_sha is not None else MATH_ONNX_SHA256).lower()
+    expected_tok = (tok_sha if tok_sha is not None else MATH_TOKENIZER_SHA256).lower()
+    with zipfile.ZipFile(zip_path) as archive:
+        names = [info.filename.replace("\\", "/") for info in archive.infolist()]
+        if MATH_PACK_ONNX not in names or MATH_PACK_TOKENIZER not in names:
+            raise MathInstallError(MATH_INSTALL_HASH_MSG)
+        if _zip_member_sha256(archive, MATH_PACK_ONNX) != expected_onnx:
+            raise MathInstallError(MATH_INSTALL_HASH_MSG)
+        if _zip_member_sha256(archive, MATH_PACK_TOKENIZER) != expected_tok:
+            raise MathInstallError(MATH_INSTALL_HASH_MSG)
+        root = CONFIG_DIR.resolve()
+        for info in archive.infolist():
+            name = info.filename.replace("\\", "/")
+            if name.endswith("/") or not _safe_math_member(name):
+                continue
+            target = (CONFIG_DIR / name).resolve()
+            if target != root and root not in target.parents:
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info) as src, target.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+    _math_cache.update(key=None, session=None, tokenizer=None)
+
+
+def install_math_pack(progress=None, cancelled=None, opener=None, url: str | None = None) -> None:
+    """받아 확인한 뒤 푼다. 끝나면 받은 zip 은 지운다. 설치를 누르기 전에는 호출하지 않는다."""
+    dest = _math_download_path()
+    fetch_math_pack(dest, url=url, opener=opener, progress=progress, cancelled=cancelled)
+    if cancelled and cancelled():
+        raise MathInstallCancelled()
+    if progress:
+        progress(1, 1, "extract")
+    extract_math_pack(dest)
+    dest.unlink(missing_ok=True)
+
+
+def math_component_present() -> bool:
+    """모델이나 실행 구성 요소 폴더가 있으면 True. 받지는 않는다."""
+    onnx, tok = math_model_files()
+    if onnx is not None or tok is not None:
+        return True
+    folder = CONFIG_DIR / "math"
+    if not folder.is_dir():
+        return False
+    try:
+        next(folder.iterdir())
+    except StopIteration:
+        return False
+    except OSError:
+        return False
+    return True
+
+
+def remove_math_component() -> None:
+    """받아 둔 수식 모델, 실행 구성 요소, 이어받기 파일을 지운다."""
+    import shutil
+    for rel in ("math", Path("models") / "formula", "downloads"):
+        target = CONFIG_DIR / rel
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+        elif target.exists():
+            target.unlink(missing_ok=True)
+    _math_cache.update(key=None, session=None, tokenizer=None)
+
+
+def build_math_install_box(parent=None) -> QMessageBox:
+    """설치 / 취소. exec 는 confirm_math_install 만 한다."""
+    box = QMessageBox(parent)
+    box.setWindowTitle(APP_NAME)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setText(MATH_INSTALL_TITLE)
+    install = box.addButton("설치", QMessageBox.ButtonRole.AcceptRole)
+    cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(install)
+    box._install_btn = install
+    box._cancel_btn = cancel
+    return box
+
+
+def confirm_math_install(parent=None) -> bool:
+    """설치를 누르면 True. 파일을 받지는 않는다."""
+    box = build_math_install_box(parent)
+    box.exec()
+    return box.clickedButton() is box._install_btn
+
+
+def confirm_math_remove(parent=None) -> bool:
+    box = QMessageBox(parent)
+    box.setWindowTitle(APP_NAME)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setText(MATH_REMOVE_MSG)
+    remove = box.addButton("제거", QMessageBox.ButtonRole.AcceptRole)
+    cancel = box.addButton("취소", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(cancel)
+    box.exec()
+    return box.clickedButton() is remove
+
+
+class _MathInstallThread(QThread):
+    progressed = Signal(int, int, str)
+    failed = Signal(str)
+    succeeded = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        try:
+            install_math_pack(
+                progress=lambda done, total, phase: self.progressed.emit(int(done), int(total), str(phase)),
+                cancelled=lambda: self._cancel,
+            )
+        except MathInstallCancelled:
+            self.failed.emit(MATH_INSTALL_CANCELLED_MSG)
+        except MathInstallError as exc:
+            self.failed.emit(exc.message)
+        except Exception:
+            self.failed.emit(MATH_INSTALL_FAILED_MSG)
+        else:
+            self.succeeded.emit()
+
+
+def _run_math_install_dialog(parent=None) -> None:
+    """진행 창을 띄우고 받는다. 취소·실패는 예외로 알린다."""
+    dialog = QProgressDialog("수식 기능을 받고 있어요.", "취소", 0, 0, parent)
+    dialog.setWindowTitle(APP_NAME)
+    dialog.setMinimumDuration(0)
+    dialog.setAutoClose(False)
+    dialog.setAutoReset(False)
+    dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+    worker = _MathInstallThread()
+    outcome = {"err": None}
+    finished = {"v": False}
+    loop = QEventLoop()
+
+    def on_progress(done: int, total: int, phase: str):
+        if phase == "check":
+            dialog.setLabelText("받은 파일을 확인하고 있어요.")
+        elif phase == "extract":
+            dialog.setLabelText("수식 기능을 준비하고 있어요.")
+        elif total > 0:
+            dialog.setMaximum(total)
+            dialog.setValue(min(done, total))
+            dialog.setLabelText(
+                f"수식 기능을 받고 있어요. ({done / 1048576:.0f} / {total / 1048576:.0f}MB)")
+        else:
+            dialog.setLabelText("수식 기능을 받고 있어요.")
+
+    def stop(err: str):
+        if finished["v"]:
+            return
+        finished["v"] = True
+        outcome["err"] = err
+        loop.quit()
+
+    dialog.canceled.connect(lambda: None if finished["v"] else worker.cancel())
+    worker.progressed.connect(on_progress)
+    worker.succeeded.connect(lambda: stop(""))
+    worker.failed.connect(stop)
+    worker.start()
+    dialog.show()
+    loop.exec()
+    dialog.close()
+    worker.wait(5000)
+    if outcome["err"]:
+        if outcome["err"] == MATH_INSTALL_CANCELLED_MSG:
+            raise MathInstallCancelled()
+        raise MathInstallError(outcome["err"])
+
+
+def ensure_math_installed(parent=None) -> tuple:
+    """이미 쓸 수 있으면 바로 True. 아니면 설치를 물어 보고, 눌렀을 때만 받는다.
+
+    반환은 (성공 여부, 안내 문장). 실패 안내 창은 여기서 띄운다.
+    """
+    if math_status() == "ok":
+        return True, ""
+    if not confirm_math_install(parent):
+        return False, MATH_INSTALL_CANCELLED_MSG
+    try:
+        _run_math_install_dialog(parent)
+    except MathInstallCancelled:
+        return False, MATH_INSTALL_CANCELLED_MSG
+    except MathInstallError as exc:
+        QMessageBox.warning(parent, APP_NAME, exc.message)
+        return False, exc.message
+    return True, ""
+
+
 def build_ocr_mode_menu(parent=None):
     """글자 / 표 / 수식. 핀 메뉴와 메인 창 우클릭이 함께 쓴다."""
     menu = QMenu(parent)
@@ -2204,8 +2608,9 @@ def build_ocr_mode_menu(parent=None):
 def recognize_image(image: QImage, mode: str = "text") -> OcrResult:
     """글자·표·수식을 읽는다. 글자와 표는 Windows.Media.Ocr, 수식은 로컬 모델.
 
-    모듈·언어 팩·수식 모델이 없으면 안내 문장을 돌려준다. 화면 보호를 우회하지 않고,
-    수식 모델을 네트워크로 받아 오지 않는다. 글자 모드는 하드 랩된 줄을 문단으로 잇는다.
+    모듈·언어 팩·수식 모델이 없으면 안내 문장을 돌려준다. 화면 보호를 우회하지 않는다.
+    이 함수는 파일을 받지 않는다. 받기는 사용자가 설치를 누른 뒤 ensure_math_installed 만 한다.
+    글자 모드는 하드 랩된 줄을 문단으로 잇는다.
     """
     if image is None or (hasattr(image, "isNull") and image.isNull()):
         return OcrResult(False, "", "이미지가 없어요.")
@@ -2778,6 +3183,12 @@ class PinWindow(QWidget):
         # 형광펜·모자이크가 글자를 가리면 인식이 나빠져서, OCR 은 표시 없는 원본을 본다.
         # 글자 모드(기본)는 인자 없이 호출한다. 기존 시험의 가짜 copy_ocr 와 맞추기 위해서다.
         image = self.image_for_ocr()
+        if mode == "math" and math_status() != "ok":
+            ok, note = ensure_math_installed(self)
+            if not ok:
+                if note == MATH_INSTALL_CANCELLED_MSG:
+                    self.show_toast(note, 4200)
+                return OcrResult(False, "", note)
         if mode == "text":
             result = recognize_image(image)
         else:
@@ -3688,6 +4099,17 @@ class SettingsDialog(QDialog):
         sc.addWidget(btn_desktop)
         sc.addWidget(btn_startup)
         left.addWidget(g_sc)
+
+        g_math = QGroupBox("수식")
+        math_lay = QVBoxLayout(g_math)
+        self.lbl_math = _muted("")
+        self.btn_math_remove = QPushButton("수식 기능 제거")
+        self.btn_math_remove.setToolTip("받아 둔 수식 모델과 실행 구성 요소를 지워요. 글자와 표는 그대로예요.")
+        self.btn_math_remove.clicked.connect(self._remove_math)
+        math_lay.addWidget(self.lbl_math)
+        math_lay.addWidget(self.btn_math_remove)
+        self._refresh_math_row()
+        left.addWidget(g_math)
         left.addStretch(1)
 
         g2 = QGroupBox("캡처할 때")
@@ -3772,6 +4194,23 @@ class SettingsDialog(QDialog):
         bb.accepted.connect(self._accept)
         bb.rejected.connect(self.reject)
         v.addWidget(bb)
+
+    def _refresh_math_row(self):
+        if math_component_present():
+            self.lbl_math.setText("수식 기능이 설치되어 있어요.")
+            self.btn_math_remove.setEnabled(True)
+        else:
+            self.lbl_math.setText("아직 설치하지 않았어요. 글자 복사에서 수식을 고르면 설치할 수 있어요.")
+            self.btn_math_remove.setEnabled(False)
+
+    def _remove_math(self):
+        if not math_component_present():
+            self._refresh_math_row()
+            return
+        if not confirm_math_remove(self):
+            return
+        remove_math_component()
+        self._refresh_math_row()
 
     def _browse(self):
         d = QFileDialog.getExistingDirectory(self, "저장할 폴더를 골라 주세요", self.ed_dir.text())
@@ -4226,6 +4665,17 @@ class MainToolbar(QWidget):
                 break
         menu.deleteLater()
 
+    def _stop_math_until_installed(self):
+        """수식이 없으면 설치를 묻는다. 핀의 copy_ocr 가 다시 묻지 않게, 직접 인식할 때만 쓴다."""
+        if math_status() == "ok":
+            return None
+        ok, note = ensure_math_installed(self)
+        if ok:
+            return None
+        if note == MATH_INSTALL_CANCELLED_MSG:
+            self._show_notice(note, msec=4200)
+        return OcrResult(False, "", note)
+
     def _ocr_current(self, mode: str = "text"):
         img = getattr(self, "_cur_img", None)
         if img is not None and not img.isNull():
@@ -4234,6 +4684,10 @@ class MainToolbar(QWidget):
                 if mode == "text":
                     return pin.copy_ocr()
                 return pin.copy_ocr(mode)
+            if mode == "math":
+                stopped = self._stop_math_until_installed()
+                if stopped is not None:
+                    return stopped
             result = recognize_image(img) if mode == "text" else recognize_image(img, mode)
             if result.ok and result.text:
                 QApplication.clipboard().setText(result.text)

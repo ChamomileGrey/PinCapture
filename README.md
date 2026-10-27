@@ -25,7 +25,7 @@
 
 - **자동 저장 + 클립보드**: 캡처하면 `캡처_YYYYMMDD_HHMMSS.png`(또는 `.jpg`)로 저장되고 클립보드에도 복사됩니다. 핀 캡처는 기본적으로 클립보드에만 복사됩니다.
 - **보관함**: 방금 캡처는 크게 보여 주고, 이전 캡처는 오른쪽 목록에 쌓입니다. 저장 폴더에 있던 기존 캡처도 불러옵니다. `Ctrl`/`Shift`+클릭, 드래그, `Ctrl+A`로 여러 개를 골라 한 번에 복사·저장·핀 고정·목록에서 제거할 수 있습니다(파일은 지우지 않음).
-- **핀**: 드래그로 이동, 마우스 휠로 크기 조절, Ctrl+휠 또는 우클릭으로 투명도(100/80/60/40%), 우클릭 메뉴(글자 복사·복사·저장·원래 크기·표시·스포이트·자·클릭 통과), 더블클릭이나 `Esc`로 닫기. 클릭 통과를 켜면 트레이 메뉴나 `Ctrl+Alt+X`로 끕니다. 글자 복사는 Windows OCR로 문단을 맞추고, 표는 엑셀(TSV)이나 Markdown으로 복사합니다. 수식(LaTeX)은 약 233MB 모델을 직접 넣었을 때만 동작하고, 없으면 안내만 합니다. 앱은 그 모델을 받아 오지 않습니다.
+- **핀**: 드래그로 이동, 마우스 휠로 크기 조절, Ctrl+휠 또는 우클릭으로 투명도(100/80/60/40%), 우클릭 메뉴(글자 복사·복사·저장·원래 크기·표시·스포이트·자·클릭 통과), 더블클릭이나 `Esc`로 닫기. 클릭 통과를 켜면 트레이 메뉴나 `Ctrl+Alt+X`로 끕니다. 글자 복사는 Windows OCR로 문단을 맞추고, 표는 엑셀(TSV)이나 Markdown으로 복사합니다. 수식(LaTeX)은 처음 고르면 설치 창이 뜨고, 설치를 눌렀을 때만 약 214MB를 받습니다. 취소하면 받지 않습니다. 설정의 **수식 기능 제거**로 지울 수 있습니다.
 - **표시**: 핀 우클릭의 **표시** 또는 `Ctrl+Alt+M`으로 화살표, 네모, 형광펜, 모자이크를 그립니다. 색·두께는 핀 옆 작은 도구에서 고르고, `Ctrl+Z` / `Ctrl+Y`로 취소·복구합니다. 그리는 동안 핀은 드래그로 움직이지 않고, `Esc`는 핀을 닫지 않습니다. 복사·저장 이미지에는 표시가 들어가고, OCR은 원본을 읽습니다.
 - **스포이트·자**: 화면을 멈춘 뒤 동작합니다. 스포이트는 클릭한 색의 HEX를 복사하고, 자는 같은 모니터의 두 점을 물리 픽셀로 잽니다. 캡처가 막혀 있으면 검은 화면을 덮지 않고 안내만 합니다.
 - **트레이 상주**: 창을 닫아도 트레이에 남아 단축키가 계속 동작합니다. 중복 실행하면 새로 뜨지 않고 기존 창이 앞으로 옵니다.
@@ -86,7 +86,7 @@ Get-FileHash .\PinCapture-Setup-0.10.0.exe -Algorithm SHA256
 
 ## 개인정보
 
-핀캡처는 네트워크에 연결하지 않습니다. 업데이트 확인, 사용 통계, 오류 보고 전송 기능이 없습니다. 단축키를 감지하려고 키보드 입력을 확인하지만, 입력 내용을 저장하거나 보내지 않습니다. **후원하기**는 기본 브라우저로 Ko-fi 페이지만 열 뿐, 앱이 그 페이지를 읽거나 정보를 보내지 않습니다.
+평소에 핀캡처는 네트워크에 연결하지 않습니다. 업데이트 확인, 사용 통계, 오류 보고 전송 기능이 없습니다. 수식 기능의 **설치**를 눌렀을 때만 릴리스의 수식 구성 요소를 받습니다. 단축키를 감지하려고 키보드 입력을 확인하지만, 입력 내용을 저장하거나 보내지 않습니다. **후원하기**는 기본 브라우저로 Ko-fi 페이지만 열 뿐, 앱이 그 페이지를 읽거나 정보를 보내지 않습니다.
 
 핀캡처가 직접 파일을 쓰는 곳은 아래가 전부입니다(`~`는 `C:\Users\<사용자>`).
 
@@ -97,8 +97,9 @@ Get-FileHash .\PinCapture-Setup-0.10.0.exe -Algorithm SHA256
 | `~/.pincapture/pincapture.log` | 실행 기록: 시작 시각, 버전, 실행 파일 경로, 명령줄 인수, 오류. 512KB를 넘으면 `pincapture.log.old`로 바뀝니다. | 실행할 때마다 |
 | `~/.pincapture/clipboard/` | 여러 캡처를 한 번에 복사할 때 쓰는 임시 PNG | 여러 개 복사할 때 |
 | `%TEMP%\pincapture-recent-pins\` | 닫은 핀을 다시 열기 위한 임시 PNG(기본 최근 10개) | 핀을 닫을 때 |
-| `~/.pincapture/models/formula/` | 수식(LaTeX)용 ONNX와 토크나이저. 앱이 받아 오지 않고, 직접 넣었을 때만 있습니다. | 수식을 쓰려고 파일을 넣었을 때 |
-| `~/.pincapture/math/` | 수식 실행 구성 요소(ONNX Runtime 등). 설치 파일에는 없고, 직접 설치했을 때만 있습니다. | 수식을 쓰려고 설치했을 때 |
+| `~/.pincapture/models/formula/` | 수식(LaTeX)용 ONNX와 토크나이저 | 수식 기능의 설치를 눌렀을 때 |
+| `~/.pincapture/math/` | 수식 실행 구성 요소(ONNX Runtime 등). 기본 설치 파일에는 없습니다. | 수식 기능의 설치를 눌렀을 때 |
+| `~/.pincapture/downloads/` | 수식 구성 요소를 받다가 남긴 임시 파일 | 설치를 취소했을 때. 다음에 이어서 받습니다. |
 | `~/.pincapture/pincapture.ico` | 바로가기 아이콘 | 소스 실행에서 바로가기를 만들 때만 |
 | 시작 메뉴·바탕화면·시작 프로그램 바로가기 | `핀캡처.lnk` | 설치할 때 고른 항목, 또는 설정의 바로가기 버튼 |
 
@@ -174,7 +175,7 @@ Get-FileHash .\PinCapture-Setup-0.10.0.exe -Algorithm SHA256
 
 **핀캡처 자체 코드는 All rights reserved입니다.** 누구나 개인적·상업적 목적으로 무료로 쓸 수 있지만, 코드의 재배포·수정·판매는 허락 없이 할 수 없습니다. 자세한 조건은 [LICENSE](LICENSE)를 보세요. 이 저장소의 공개는 코드 열람을 위한 것이며 오픈소스 라이선스를 부여하지 않습니다.
 
-설치 파일에 포함된 오픈소스 구성 요소(Qt / PySide6, pynput, six, PyWinRT, Python 런타임 등)의 고지와 라이선스 전문은 [installer/docs/THIRD_PARTY_NOTICES.txt](installer/docs/THIRD_PARTY_NOTICES.txt)와 [installer/docs/licenses/](installer/docs/licenses/)에 있습니다. PySide6와 pynput은 LGPL-3.0이며, 설치본에서 별도 파일로 들어 있어 사용자가 교체할 수 있습니다. 글자 복사에 쓰는 PyWinRT는 MIT입니다. 수식 모드는 선택입니다. 모델(PaddlePaddle PP-FormulaNet_plus-S, Apache-2.0)과 런타임(ONNX Runtime MIT, tokenizers Apache-2.0, NumPy BSD-3-Clause, PyYAML MIT)은 기본 설치 파일에 들어 있지 않습니다. pix2tex 가중치(CC BY-NC-SA)는 쓰지 않습니다.
+설치 파일에 포함된 오픈소스 구성 요소(Qt / PySide6, pynput, six, PyWinRT, Python 런타임 등)의 고지와 라이선스 전문은 [installer/docs/THIRD_PARTY_NOTICES.txt](installer/docs/THIRD_PARTY_NOTICES.txt)와 [installer/docs/licenses/](installer/docs/licenses/)에 있습니다. PySide6와 pynput은 LGPL-3.0이며, 설치본에서 별도 파일로 들어 있어 사용자가 교체할 수 있습니다. 글자 복사에 쓰는 PyWinRT는 MIT입니다. 수식 모드는 선택입니다. 모델(PaddlePaddle PP-FormulaNet_plus-S, Apache-2.0)과 런타임(ONNX Runtime MIT, tokenizers Apache-2.0, NumPy BSD-3-Clause, PyYAML MIT)은 기본 설치 파일에 들어 있지 않고, 설치를 눌렀을 때 받는 별도 zip에만 있습니다. pix2tex 가중치(CC BY-NC-SA)는 쓰지 않습니다.
 
 ## 크레딧
 

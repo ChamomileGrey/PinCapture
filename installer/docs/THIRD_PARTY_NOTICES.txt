@@ -81,10 +81,15 @@ This program uses the following open-source software. Full license texts are in 
    Source  : https://github.com/python/typing_extensions
 
 
-8. Optional formula-to-LaTeX pieces  (NOT included in the installer)
-   수식 mode can turn a captured formula into LaTeX. The S model file is 233,421,946 bytes (about 233 MB), so the
-   base installer does not ship it, and the app never downloads it. Text and table copy
-   work without these files. If you add them yourself, these notices apply.
+8. Optional formula-to-LaTeX pack  (NOT included in the installer)
+   수식 mode can turn a captured formula into LaTeX. The base installer does not ship
+   the model or the runtime. Text and table copy work without them.
+   The app downloads PinCapture-Math-<version>.zip only after the user clicks 설치,
+   checks its SHA-256, and checks the model and tokenizer hashes inside the zip.
+   Cancelling leaves a partial file so the next 설치 can resume. 설정 can remove the files.
+
+   The zip is a GitHub release asset built by installer/build_math_pack.py.
+   It contains PP-FormulaNet_plus-S (about 233 MB) plus the Windows runtime below.
 
    PP-FormulaNet_plus-S  (PaddlePaddle)
    License : Apache License 2.0  — licenses\Apache-2.0.txt
@@ -98,8 +103,8 @@ This program uses the following open-source software. Full license texts are in 
    pix2tex / LaTeX-OCR weights are NOT used. Those weights are CC BY-NC-SA and are not
    a permissive license. Do not add them to this app.
 
-   If you install the optional runtime (requirements-math.txt, or pip -t into
-   %USERPROFILE%\.pincapture\math), these libraries stay outside the installer:
+   The runtime inside the zip is the official Windows wheels, extracted so the
+   app can load them without pip. They stay outside the base installer:
 
    ONNX Runtime 1.23.2
    License : MIT  — licenses\ONNXRuntime-MIT.txt

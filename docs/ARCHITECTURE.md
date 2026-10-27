@@ -170,7 +170,8 @@ Windows 가 아니면 `capture_active_window` 는 마우스가 있는 모니터 
 - 스포이트·자는 `ScreenInspectSession` / `InspectOverlay`. 영역 캡처와 같이 모니터별 정지 화면이고, `physical_point`로 물리 픽셀을 고른다. `screens_capture_blocked`면 오버레이를 띄우지 않는다.
 - `set_click_through`: `WindowTransparentForInput` 과 Windows `WS_EX_TRANSPARENT`. 켠 뒤에는 핀으로 끌 수 없고, `MainToolbar.clear_click_through`(트레이·단축키 `clickthrough`)만 끈다.
 - `recognize_image(image, mode="text")`: PyWinRT `Windows.Media.Ocr` 단어 상자. `text` 는 `reconstruct_paragraphs`(하드 랩은 잇고 문단은 남김). `table` / `table-md` 는 `table_from_words` → TSV / Markdown. 가져오기 실패·언어 팩 없음은 안내 문장으로 반환(우회 없음). 글자 모드는 `recognize_image(image)` 한 인자로도 동작한다.
-- `math` 는 Windows OCR 보다 먼저 `math_status()` 를 본다. `"ok"` 일 때만 `predict_latex`(로컬 ONNX, CPU). `"no-model"` / `"no-runtime"` 은 안내만 하고 네트워크를 열지 않는다. 모델 파일은 `math_model_files()` 가 `PINCAPTURE_MATH_DIR`, `CONFIG_DIR/models/formula`, `CONFIG_DIR/math/models`, `app_dir()/math/models` 에서 찾는다. 런타임(`onnxruntime`, `tokenizers`, `numpy`, YAML 토크나이저일 때 `yaml`)은 리터럴 import 가 없고, `CONFIG_DIR/math` 또는 `app_dir()/math` 가 `sys.path` 에 있을 때만 불러온다. 기본 설치 파일에는 넣지 않는다.
+- `math` 는 Windows OCR 보다 먼저 `math_status()` 를 본다. `"ok"` 일 때만 `predict_latex`(로컬 ONNX, CPU). `recognize_image` 는 네트워크를 열지 않는다. 모델 파일은 `math_model_files()` 가 `PINCAPTURE_MATH_DIR`, `CONFIG_DIR/models/formula`, `CONFIG_DIR/math/models`, `app_dir()/math/models` 에서 찾는다. 런타임(`onnxruntime`, `tokenizers`, `numpy`, YAML 토크나이저일 때 `yaml`)은 리터럴 import 가 없고, `CONFIG_DIR/math` 또는 `app_dir()/math` 가 `sys.path` 에 있을 때만 불러온다. 기본 설치 파일에는 넣지 않는다.
+- 수식이 없을 때 `copy_ocr("math")` 와 보관함 직접 인식은 `ensure_math_installed` 를 부른다. 설치 창에서 **설치**를 눌러야 `install_math_pack` 이 `MATH_PACK_URL`(GitHub 릴리스의 `PinCapture-Math-<버전>.zip`)을 받는다. 부분 파일은 `CONFIG_DIR/downloads/*.partial` 이고 Range 로 이어받는다. zip SHA-256 과 안의 onnx·`inference.yml` SHA-256 을 확인한 뒤 `math/` 와 `models/formula/` 에 푼다. 설정 창의 **수식 기능 제거**는 `remove_math_component`.
 - `closed(self)` → `MainToolbar._on_pin_closed` 가 `_pins` 에서 빼고 `RecentPinStore.remember` (임시 폴더 PNG + 메모리). `reopen_recent_pin` 이 최신 항목을 다시 `_make_pin`.
 
 ---
@@ -485,7 +486,7 @@ sequenceDiagram
 | `PINCAP_TEST_RESTART` | 수동 시험 | 시작 1.5초 뒤 `restart_app` |
 | `PYINSTALLER_RESET_ENVIRONMENT` | `restart_app` (EXE) | 새 프로세스가 곧 정리될 부모의 PyInstaller 런타임을 물려받지 않게 |
 | `QT_QPA_PLATFORM=offscreen` | `tests/`, `build.py` 연기 시험, `main`(Windows 외 `--selftest`) | 화면 없이 Qt 실행. 이때 트레이 없음(`_tray is None`), `force_foreground` 는 아무것도 안 함 |
-| `PINCAPTURE_MATH_DIR` | 사용자가 직접 | 수식 ONNX·토크나이저 폴더. 그 폴더와 부모를 선택 런타임(`pip -t`) 경로로도 본다. 비어 있으면 `~/.pincapture/models/formula` 와 `~/.pincapture/math`. 앱은 받아 오지 않음 |
+| `PINCAPTURE_MATH_DIR` | 사용자가 직접 | 수식 ONNX·토크나이저를 추가로 찾을 폴더. 비어 있으면 설치 버튼이 푼 `~/.pincapture/models/formula` 와 `~/.pincapture/math` 를 쓴다 |
 
 ---
 

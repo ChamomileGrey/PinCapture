@@ -38,7 +38,7 @@ pyw -3.13 pincapture.py         # 콘솔 없이. 오류는 로그와 메시지 �
 
 수동 시험용 환경 변수 `PINCAP_TEST_RESTART`, `PINCAP_TEST_AUTOEXIT`는 `docs/ARCHITECTURE.md` 19절에 있어요.
 
-수식(LaTeX)은 선택입니다. `requirements-math.txt`를 `requirements.txt`나 설치 파일에 넣지 않아요. `installer/PinCapture.spec`이 `onnxruntime`, `tokenizers`, `yaml`, `numpy`를 빼고, `build.py`의 묶음 검사가 경로에 `onnxruntime`, `tokenizers`, `pp_formulanet`, `pix2tex`가 있으면 빌드를 멈춰요. 소스에서는 `py -3.13 -m pip install -r requirements-math.txt`이고, 모델 파일은 `~/.pincapture/models/formula`에 직접 둬요. 주소와 SHA-256은 `installer/docs/사용법.txt`에 있어요. 폴더를 바꾸려면 `PINCAPTURE_MATH_DIR`를 써요. 설치판 EXE는 자기 폴더에 pip 설치가 안 되니, Python 3.13으로 `-t "%USERPROFILE%\.pincapture\math"`에 받아요.
+수식(LaTeX)은 선택입니다. 사용자는 글자 복사의 **수식**에서 **설치**를 누를 때만 zip을 받아요. Python이나 pip는 필요 없어요. `requirements-math.txt`를 `requirements.txt`나 설치 파일에 넣지 않아요. `installer/PinCapture.spec`이 `onnxruntime`, `tokenizers`, `yaml`, `numpy`를 빼고, `build.py`의 묶음 검사가 경로에 `onnxruntime`, `tokenizers`, `pp_formulanet`, `pix2tex`가 있으면 빌드를 멈춰요. 릴리스에 붙는 zip은 `py -3.13 installer/build_math_pack.py`가 만들고, `pincapture.py`의 `MATH_PACK_SHA256`·`MATH_PACK_BYTES`와 같아야 해요. `--check`가 다르면 끝나요. 태그 빌드가 이 zip을 초안 릴리스에 넣어요. 초안은 공개 주소로 받을 수 없으니, 설치 버튼이 동작하려면 릴리스를 게시해야 해요.
 
 ## 2. Python 선택 함정
 

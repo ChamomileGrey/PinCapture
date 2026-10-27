@@ -1,15 +1,9 @@
-# Optional formula-to-LaTeX runtime. NOT part of the base installer or requirements.txt.
-# The app never downloads these. Install them only when you want 수식 mode.
+# Developer-only formula runtime. NOT part of the base installer or requirements.txt.
+# End users do not use this file. They click 설치 in the app, which downloads
+# PinCapture-Math-<version>.zip. Do not add these packages to the PyInstaller build.
 #
-# Source checkout (Python 3.13, same interpreter that runs pincapture.py):
+# A source checkout can install the same libraries for local experiments:
 #   py -3.13 -m pip install -r requirements-math.txt
-#
-# Installed PinCapture.exe cannot pip-install into itself. Put wheels next to the
-# model folder with the same Python 3.13 (cp313) so the frozen interpreter can load them:
-#   py -3.13 -m pip install -r requirements-math.txt -t "%USERPROFILE%\.pincapture\math"
-#
-# Model files (not these packages) go in %USERPROFILE%\.pincapture\models\formula.
-# Addresses and the SHA-256 are in installer/docs/사용법.txt.
 # onnxruntime is MIT, tokenizers is Apache-2.0, numpy is BSD-3-Clause, PyYAML is MIT.
 onnxruntime==1.23.2
 tokenizers==0.21.4
