@@ -69,7 +69,13 @@ def toolbar(pc, tmp_path, monkeypatch):
     tb.populate()
     yield tb
     tb.hotkeys.stop()
+    notice = getattr(tb, "_notice_toast", None)
+    if notice is not None:
+        notice.close()
     for p in list(tb._pins):
+        toast = getattr(p, "_toast", None)
+        if toast is not None:
+            toast.close()
         p.close()
     box = getattr(tb, "_blocked_box", None)
     if box is not None:

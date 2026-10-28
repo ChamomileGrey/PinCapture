@@ -4,7 +4,7 @@
 
 ![핀캡처 메인 창: 위쪽 캡처 버튼, 가운데 방금 캡처, 오른쪽 이전 캡처 목록](docs/images/screenshot-main.png)
 
-- 현재 버전: **0.10.0** (`pincapture.py`의 `APP_VERSION`)
+- 현재 버전: **0.10.1** (`pincapture.py`의 `APP_VERSION`)
 - 만든 이: **캐모마일그레이 (ChamomileGrey)**
 - 대상: Windows 10 / 11, 64비트(x64)
 - 계정·광고 없음. 앱은 네트워크에 연결하지 않고, 후원하기를 누를 때만 기본 브라우저를 엽니다.
@@ -67,7 +67,7 @@
 받은 파일이 올라온 파일과 같은지 확인하려면 Releases에 함께 올라온 `PinCapture-Setup-<버전>.sha256.txt`의 값과 비교합니다.
 
 ```powershell
-Get-FileHash .\PinCapture-Setup-0.10.0.exe -Algorithm SHA256
+Get-FileHash .\PinCapture-Setup-0.10.1.exe -Algorithm SHA256
 ```
 
 - **업데이트**: 새 설치 파일을 실행하면 됩니다. 실행 중인 핀캡처는 자동으로 닫히고 설정은 유지됩니다. 이때 화면의 핀과 파일로 저장하지 않은 캡처는 사라집니다.

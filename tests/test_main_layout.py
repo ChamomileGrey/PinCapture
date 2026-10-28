@@ -118,9 +118,14 @@ def test_icons_are_drawn_for_hidpi(pc):
 
 def test_pin_tools_need_a_capture_or_a_pin(pc, toolbar):
     assert toolbar.btn_markup.isEnabled() is False
-    assert toolbar.btn_ocr.isEnabled() is False
+    # OCR stays clickable so a missing target still shows a toast. Markup stays disabled.
+    assert toolbar.btn_ocr.isEnabled() is True
     assert "없어요" in toolbar.btn_markup.toolTip()
     assert "없어요" in toolbar.btn_ocr.toolTip()
+    toolbar.btn_ocr.click()
+    assert toolbar._notice_toast is not None
+    assert toolbar._notice_toast.isVisible()
+    assert "없어요" in toolbar._notice_toast.label.text()
     assert toolbar.btn_eyedropper.isEnabled()
     assert toolbar.btn_ruler.isEnabled()
     assert toolbar.btn_reopen.isEnabled()
