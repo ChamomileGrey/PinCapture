@@ -29,7 +29,9 @@
 #                      최근 핀을 캡처 줄 오른쪽의 작은 아이콘으로 배치
 #   v0.10.0 2026-10-27 Grok (Grok 4.7) — 글자 복사에 문단 맞추기, 표(TSV·Markdown), 수식(LaTeX).
 #                      수식은 기본 설치에 넣지 않고, 설치를 눌렀을 때만 받는다
-#   Created: 2026-08-04 by Claude via claude.ai / Modified: 2026-10-27 by Grok 4.7 via Cursor
+#   v0.10.1 2026-10-28 Grok (Grok 4.7) — 글자 복사 안내를 화면 위 토스트로 보여 줌.
+#                      트레이 풍선만 쓰면 알림이 꺼져 있을 때 반응이 없었음
+#   Created: 2026-08-04 by Claude via claude.ai / Modified: 2026-10-28 by Grok 4.7 via Cursor
 #   빌드: installer/build.py  (PyInstaller onedir + Inno Setup → PinCapture-Setup-<버전>.exe)
 """
 핀캡처 (PinCapture) — 화면 캡처 도구
@@ -67,7 +69,7 @@ IS_WINDOWS = sys.platform == "win32"
 _NO_WINDOW = 0x08000000 if IS_WINDOWS else 0   # subprocess.CREATE_NO_WINDOW
 
 APP_NAME = "핀캡처"
-APP_VERSION = "0.10.0"
+APP_VERSION = "0.10.1"
 APP_PUBLISHER = "캐모마일그레이"                 # 정보 창에 보이는 이름
 APP_PUBLISHER_EN = "ChamomileGrey"             # 설치 정보·EXE 속성과 같은 영문 이름
 KOFI_URL = "https://ko-fi.com/chamomilegrey"   # 후원하기. 이 주소만 연다
@@ -1355,6 +1357,7 @@ OCR_NO_LANGUAGE_MSG = (
 OCR_EMPTY_MSG = "이미지에서 글자를 찾지 못했어요."
 OCR_FAILED_MSG = "글자를 읽지 못했어요. 잠시 뒤 다시 시도해 주세요."
 OCR_COPIED_MSG = "글자를 복사했어요."
+OCR_BUSY_MSG = "읽는 중…"
 OCR_TABLE_COPIED_MSG = "표를 복사했어요. 엑셀에 붙여 넣으면 칸으로 들어가요."
 OCR_TABLE_MD_MSG = "표를 Markdown으로 복사했어요."
 OCR_TABLE_EMPTY_MSG = "표로 읽을 칸을 찾지 못했어요."
@@ -1421,6 +1424,21 @@ class OcrResult:
         self.ok = ok
         self.text = text
         self.message = message
+
+
+def _log_exc(tag: str, exc: BaseException, note: str = "") -> None:
+    """예외를 로그에 남긴다. 설치본(EXE)은 콘솔이 없어서 여기가 아니면 오류가 사라진다.
+
+    _setup_logging 이 stdout/stderr 를 ~/.pincapture/pincapture.log 로 복사한다.
+    시험은 PINCAP_NO_LOG 라 파일은 건드리지 않고 시험 출력으로만 간다.
+    """
+    import traceback
+    kind = "exe" if FROZEN else "py"
+    head = f"[{tag}] {kind}"
+    if note:
+        head += f" {note}"
+    print(f"{head}: {type(exc).__name__}: {exc}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
 
 
 def format_hotkey(combo: str) -> str:
@@ -1580,11 +1598,16 @@ def _bitmap_from_rgba(data: bytes, w: int, h: int, mods: dict):
 
 
 def _await_ocr(operation):
+    """WinRT 비동기 인식이 끝날 때까지 기다린다.
+
+    설치본에서 pywinrt 객체가 코루틴으로 안 붙으면, 빈 글자로 삼키지 않고 예외로 올린다.
+    """
     if hasattr(operation, "__await__"):
         import asyncio
         try:
             return asyncio.run(operation)
-        except RuntimeError:
+        except RuntimeError as exc:
+            _log_exc("ocr", exc, "비동기 인식 재시도")
             loop = asyncio.new_event_loop()
             try:
                 return loop.run_until_complete(operation)
@@ -1592,6 +1615,9 @@ def _await_ocr(operation):
                 loop.close()
     if hasattr(operation, "get"):
         return operation.get()
+    name = type(operation).__name__
+    if "IAsync" in name or name.startswith("_IAsync"):
+        raise RuntimeError(f"OCR 비동기 결과를 끝내지 못함: {name}")
     return operation
 
 
@@ -2215,7 +2241,7 @@ def _recognize_math(image: QImage) -> OcrResult:
     try:
         latex = predict_latex(image)
     except Exception as e:
-        print(f"[math] 인식 실패: {type(e).__name__}")
+        _log_exc("math", e, "인식 실패")
         return OcrResult(False, "", MATH_FAILED_MSG)
     latex = (latex or "").strip()
     if not latex:
@@ -2523,7 +2549,8 @@ class _MathInstallThread(QThread):
             self.failed.emit(MATH_INSTALL_CANCELLED_MSG)
         except MathInstallError as exc:
             self.failed.emit(exc.message)
-        except Exception:
+        except Exception as exc:
+            _log_exc("math", exc, "설치 실패")
             self.failed.emit(MATH_INSTALL_FAILED_MSG)
         else:
             self.succeeded.emit()
@@ -2620,12 +2647,12 @@ def recognize_image(image: QImage, mode: str = "text") -> OcrResult:
     try:
         mods = _import_ocr_modules()
     except Exception as e:
-        print(f"[ocr] 모듈을 불러오지 못함: {e}")
+        _log_exc("ocr", e, "모듈을 불러오지 못함")
         return OcrResult(False, "", OCR_UNAVAILABLE_MSG)
     try:
         engine = _pick_ocr_engine(mods["OcrEngine"], mods["Language"])
     except Exception as e:
-        print(f"[ocr] 엔진 준비 실패: {e}")
+        _log_exc("ocr", e, "엔진 준비 실패")
         return OcrResult(False, "", OCR_NO_LANGUAGE_MSG)
     if engine is None:
         return OcrResult(False, "", OCR_NO_LANGUAGE_MSG)
@@ -2635,19 +2662,19 @@ def recognize_image(image: QImage, mode: str = "text") -> OcrResult:
         bitmap = _bitmap_from_rgba(data, w, h, mods)
         result = _await_ocr(engine.recognize_async(bitmap))
     except Exception as e:
-        print(f"[ocr] 인식 실패: {e}")
+        _log_exc("ocr", e, "인식 실패")
         return OcrResult(False, "", OCR_FAILED_MSG)
     raw = (getattr(result, "text", "") or "").strip()
     try:
         words = _words_from_ocr_result(result)
     except Exception as e:
-        print(f"[ocr] 단어 상자 해석 실패: {e}")
+        _log_exc("ocr", e, "단어 상자 해석 실패")
         words = []
     if mode in ("table", "table-md"):
         try:
             grid = table_from_words(words) if words else []
         except Exception as e:
-            print(f"[ocr] 표 맞추기 실패: {e}")
+            _log_exc("ocr", e, "표 맞추기 실패")
             grid = []
         if not grid:
             return OcrResult(False, "", OCR_TABLE_EMPTY_MSG)
@@ -2659,13 +2686,50 @@ def recognize_image(image: QImage, mode: str = "text") -> OcrResult:
         try:
             joined = reconstruct_paragraphs(words)
         except Exception as e:
-            print(f"[ocr] 문단 맞추기 실패: {e}")
+            _log_exc("ocr", e, "문단 맞추기 실패")
             joined = ""
         if joined:
             text = joined
     if not text:
         return OcrResult(False, "", OCR_EMPTY_MSG)
     return OcrResult(True, text, OCR_COPIED_MSG)
+
+
+def _flush_paint() -> None:
+    """읽는 중 토스트가 동기 인식 전에 그려지게 한다. 그 사이 클릭은 다시 받지 않는다."""
+    app = QApplication.instance()
+    if app is None:
+        return
+    app.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
+
+
+def run_ocr(image: QImage, mode: str, announce) -> OcrResult:
+    """글자·표·수식을 읽고 announce(문장, 밀리초) 로 진행과 결과를 알린다.
+
+    글자 모드는 recognize_image(image) 한 인자로 부른다. 기존 시험의 가짜 함수와 맞추기 위해서다.
+    두 번째 인자가 0 이면 토스트를 자동으로 닫지 않는다 (읽는 중).
+    """
+    announce(OCR_BUSY_MSG, 0)
+    _flush_paint()
+    try:
+        if (mode or "text") == "text":
+            result = recognize_image(image)
+        else:
+            result = recognize_image(image, mode)
+    except Exception as exc:
+        _log_exc("ocr", exc, "인식 중 예외")
+        result = OcrResult(False, "", OCR_FAILED_MSG)
+    if not isinstance(result, OcrResult):
+        _log_exc("ocr", TypeError(type(result).__name__), "인식 결과")
+        result = OcrResult(False, "", OCR_FAILED_MSG)
+    if result.ok and result.text:
+        try:
+            QApplication.clipboard().setText(result.text)
+        except Exception as exc:
+            _log_exc("ocr", exc, "클립보드 복사 실패")
+            result = OcrResult(False, result.text, OCR_FAILED_MSG)
+    announce(result.message, 1800 if result.ok else 4200)
+    return result
 
 
 def _set_win32_click_through(hwnd: int, on: bool) -> None:
@@ -2694,7 +2758,11 @@ def _set_win32_click_through(hwnd: int, on: bool) -> None:
 
 
 class PinToast(QWidget):
-    """핀 옆에 잠깐 떴다 사라지는 안내. 클릭 통과 중인 핀과 따로 떠 있다."""
+    """커서·핀·메인 창 옆에 잠깐 떴다 사라지는 안내.
+
+    트레이 풍선과 달리 알림 끄기나 집중 지원과 상관없이 보인다.
+    메인 창이 숨겨져 있어도 따로 뜬다. msec 가 0 이하면 다음 안내가 바꿀 때까지 둔다.
+    """
 
     def __init__(self, text: str, anchor: "QWidget | None" = None, msec: int = 1800):
         super().__init__(None)
@@ -2713,18 +2781,35 @@ class PinToast(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.label)
         self.adjustSize()
-        if anchor is not None:
-            g = anchor.frameGeometry()
-            x = g.center().x() - self.width() // 2
-            y = g.top() - self.height() - 8
-            screen = QGuiApplication.screenAt(g.center()) or QGuiApplication.primaryScreen()
-            if screen is not None:
-                bounds = screen.availableGeometry()
-                x = min(max(x, bounds.left() + 4), bounds.right() - self.width() - 4)
-                y = min(max(y, bounds.top() + 4), bounds.bottom() - self.height() - 4)
-            self.move(x, y)
+        self._place(anchor)
         self.show()
-        QTimer.singleShot(max(400, int(msec)), self.close)
+        self.raise_()
+        if int(msec) > 0:
+            QTimer.singleShot(max(400, int(msec)), self.close)
+
+    def _place(self, anchor: "QWidget | None") -> None:
+        """보이는 창이 있으면 그 위, 없으면 커서 옆. 어느 쪽이든 화면 안에 둔다."""
+        frame = None
+        if anchor is not None:
+            try:
+                if anchor.isVisible():
+                    frame = anchor.frameGeometry()
+            except RuntimeError:
+                frame = None
+        if frame is not None:
+            x = frame.center().x() - self.width() // 2
+            y = frame.top() - self.height() - 8
+            center = frame.center()
+        else:
+            center = QCursor.pos()
+            x = center.x() + 12
+            y = center.y() + 16
+        screen = QGuiApplication.screenAt(center) or QGuiApplication.primaryScreen()
+        if screen is not None:
+            bounds = screen.availableGeometry()
+            x = min(max(x, bounds.left() + 4), max(bounds.left() + 4, bounds.right() - self.width() - 4))
+            y = min(max(y, bounds.top() + 4), max(bounds.top() + 4, bounds.bottom() - self.height() - 4))
+        self.move(int(x), int(y))
 
 
 def recent_pin_dir() -> Path:
@@ -3097,6 +3182,7 @@ class PinWindow(QWidget):
         self._click_through = False
         self._drag = None
         self._toast = None
+        self._ocr_running = False
         self.release_hotkey = ""          # 클릭 통과를 끄는 전역 단축키 (표시용)
         self.on_eyedropper = None         # 화면 스포이트. MainToolbar 가 연결
         self.on_ruler = None
@@ -3182,21 +3268,27 @@ class PinWindow(QWidget):
     def copy_ocr(self, mode: str = "text") -> OcrResult:
         # 형광펜·모자이크가 글자를 가리면 인식이 나빠져서, OCR 은 표시 없는 원본을 본다.
         # 글자 모드(기본)는 인자 없이 호출한다. 기존 시험의 가짜 copy_ocr 와 맞추기 위해서다.
-        image = self.image_for_ocr()
-        if mode == "math" and math_status() != "ok":
-            ok, note = ensure_math_installed(self)
-            if not ok:
-                if note == MATH_INSTALL_CANCELLED_MSG:
+        # 안내는 이 핀 옆 토스트다. 트레이 풍선에만 맡기지 않는다.
+        if self._ocr_running:
+            return OcrResult(False, "", OCR_BUSY_MSG)
+        self._ocr_running = True
+        try:
+            image = self.image_for_ocr()
+            if mode == "math" and math_status() != "ok":
+                ok, note = ensure_math_installed(self)
+                if not ok:
                     self.show_toast(note, 4200)
-                return OcrResult(False, "", note)
-        if mode == "text":
-            result = recognize_image(image)
-        else:
-            result = recognize_image(image, mode)
-        if result.ok and result.text:
-            QApplication.clipboard().setText(result.text)
-        self.show_toast(result.message, 1800 if result.ok else 4200)
-        return result
+                    return OcrResult(False, "", note)
+            return run_ocr(image, mode, self.show_toast)
+        except Exception as exc:
+            _log_exc("ocr", exc, "핀 글자 복사")
+            try:
+                self.show_toast(OCR_FAILED_MSG, 4200)
+            except Exception as again:
+                _log_exc("ocr", again, "안내 표시 실패")
+            return OcrResult(False, "", OCR_FAILED_MSG)
+        finally:
+            self._ocr_running = False
 
     def image_for_ocr(self) -> QImage:
         return self._img
@@ -4333,6 +4425,7 @@ class MainToolbar(QWidget):
         self._pins = []
         self._recent = RecentPinStore(limit=cfg.get("recent_pin_limit", 10))
         self._notice_toast = None
+        self._ocr_running = False
         self._session = None
         self._tray = None
         self._toast_shown = False
@@ -4603,8 +4696,9 @@ class MainToolbar(QWidget):
             self.btn_markup: "그릴 캡처나 핀이 없어요. 보관함에서 고르거나 핀을 띄워 주세요.",
             self.btn_ocr: "글자를 읽을 캡처나 핀이 없어요. 보관함에서 고르거나 핀을 띄워 주세요.",
         }
+        missing = not self._has_tool_target()
         for mode, btn, name, text in hk_tips:
-            if not btn.isEnabled() and btn in empty:
+            if missing and btn in empty:
                 btn.setToolTip(f"{name}\n{empty[btn]}")
                 continue
             btn.setToolTip(f"{name}\n{text}\n{self._hotkey_line(mode)}")
@@ -4616,10 +4710,11 @@ class MainToolbar(QWidget):
         return self._front_pin() is not None
 
     def _sync_pin_tools(self) -> None:
-        """그리기·OCR 은 선택된 캡처나 맨 앞 핀이 있을 때만 누를 수 있다."""
+        """그리기는 선택된 캡처나 맨 앞 핀이 있을 때만 누를 수 있다.
+        글자 복사는 대상이 없어도 눌러서 이유를 볼 수 있게 켜 둔다."""
         has = self._has_tool_target()
         self.btn_markup.setEnabled(has)
-        self.btn_ocr.setEnabled(has)
+        self.btn_ocr.setEnabled(True)
         self._update_tooltips()
 
     def _pin_matching(self, img: QImage):
@@ -4672,11 +4767,33 @@ class MainToolbar(QWidget):
         ok, note = ensure_math_installed(self)
         if ok:
             return None
-        if note == MATH_INSTALL_CANCELLED_MSG:
-            self._show_notice(note, msec=4200)
+        self._show_notice(note, msec=4200)
         return OcrResult(False, "", note)
 
+    def _announce_ocr(self, text: str, msec: int = 1800) -> None:
+        """읽는 중은 토스트만. 결과는 토스트가 본이고, 트레이 풍선은 설정이 켜져 있을 때만 덧붙인다."""
+        if text == OCR_BUSY_MSG:
+            self._show_toast(text, msec)
+        else:
+            self._show_notice(text, msec=msec)
+
     def _ocr_current(self, mode: str = "text"):
+        if self._ocr_running:
+            return OcrResult(False, "", OCR_BUSY_MSG)
+        self._ocr_running = True
+        try:
+            return self._ocr_current_body(mode)
+        except Exception as exc:
+            _log_exc("ocr", exc, "글자 복사")
+            try:
+                self._show_notice(OCR_FAILED_MSG, msec=4200)
+            except Exception as again:
+                _log_exc("ocr", again, "안내 표시 실패")
+            return OcrResult(False, "", OCR_FAILED_MSG)
+        finally:
+            self._ocr_running = False
+
+    def _ocr_current_body(self, mode: str = "text"):
         img = getattr(self, "_cur_img", None)
         if img is not None and not img.isNull():
             pin = self._pin_matching(img)
@@ -4688,15 +4805,12 @@ class MainToolbar(QWidget):
                 stopped = self._stop_math_until_installed()
                 if stopped is not None:
                     return stopped
-            result = recognize_image(img) if mode == "text" else recognize_image(img, mode)
-            if result.ok and result.text:
-                QApplication.clipboard().setText(result.text)
-            self._show_notice(result.message, msec=1800 if result.ok else 4200)
-            return result
+            return run_ocr(img, mode, self._announce_ocr)
         pin = self._front_pin()
         if pin is None:
-            self._show_notice("글자를 읽을 캡처나 핀이 없어요.")
-            return None
+            note = "글자를 읽을 캡처나 핀이 없어요."
+            self._show_notice(note)
+            return OcrResult(False, "", note)
         if mode == "text":
             return pin.copy_ocr()
         return pin.copy_ocr(mode)
@@ -4950,12 +5064,33 @@ class MainToolbar(QWidget):
                 f"{result['distance']}px예요. 가로 {result['dx']}px, 세로 {result['dy']}px, "
                 f"화면 배율 {result['scale']}%예요.")
 
-    def _show_notice(self, text: str, title: str = APP_NAME, msec: int = 2200) -> None:
+    def _show_toast(self, text: str, msec: int = 2200) -> PinToast:
+        """화면 위 안내. 메인 창이 숨겨져 있으면 커서 옆에 둔다."""
         self._last_notice = text
-        if self._tray is not None:
-            self._tray.showMessage(title, text, QSystemTrayIcon.MessageIcon.Information, msec)
+        prev = self._notice_toast
+        self._notice_toast = None
+        if prev is not None:
+            try:
+                prev.close()
+            except Exception:
+                pass
+        anchor = self if self.isVisible() else None
+        self._notice_toast = PinToast(text, anchor, msec)
+        return self._notice_toast
+
+    def _show_notice(self, text: str, title: str = APP_NAME, msec: int = 2200) -> None:
+        """토스트가 본 안내. 트레이 풍선만 쓰면 알림 끄기·집중 지원에서 반응이 없어 보인다.
+
+        풍선은 '캡처 후 트레이 알림'이 켜져 있을 때만 덧붙이고, 그것만으로 끝내지 않는다.
+        """
+        self._show_toast(text, msec)
+        tray = self._tray
+        if tray is None or not self.cfg.get("notify"):
             return
-        self._notice_toast = PinToast(text, self if self.isVisible() else None, msec)
+        try:
+            tray.showMessage(title, text, QSystemTrayIcon.MessageIcon.Information, msec)
+        except Exception as exc:
+            _log_exc("notice", exc, "트레이 알림 실패")
 
     def reopen_recent_pin(self):
         """가장 최근에 닫은 핀을 다시 띄운다. 없으면 짧은 안내만 한다."""
